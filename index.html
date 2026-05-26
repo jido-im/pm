@@ -164,6 +164,89 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .proj-bar-fill{height:100%;border-radius:3px;transition:width .4s}
 .proj-bar-n{font-size:11px;font-weight:600;color:var(--text2);min-width:34px;text-align:right}
 
+/* Daily/Weekly nav */
+.daily-nav{display:flex;align-items:center;gap:8px;margin-bottom:14px}
+.daily-date-label{font-size:15px;font-weight:600;color:var(--text);min-width:160px;text-align:center}
+.dnav-btn{width:28px;height:28px;border:1px solid var(--border2);background:var(--card);border-radius:7px;cursor:pointer;font-size:16px;color:var(--text2);display:flex;align-items:center;justify-content:center}
+.dnav-btn:hover{background:var(--bg)}
+.dnav-today{font-size:12px;padding:5px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--card);cursor:pointer;color:var(--text2);font-family:inherit}
+.dnav-today:hover{background:var(--bg)}
+
+/* Daily split layout */
+.daily-split{display:grid;grid-template-columns:280px 1fr;gap:14px;align-items:start}
+@media(max-width:700px){.daily-split{grid-template-columns:1fr}}
+.daily-todo-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;position:sticky;top:10px}
+.daily-tl-panel{}
+
+/* Todo input */
+.todo-input-wrap{margin-bottom:10px}
+.todo-input{width:100%;font-size:13px;padding:8px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;outline:none}
+.todo-input:focus{border-color:var(--blue)}
+.todo-list{display:flex;flex-direction:column;gap:3px;max-height:calc(100vh - 280px);overflow-y:auto}
+.todo-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:7px;border:1px solid transparent;cursor:grab;transition:all .15s;user-select:none}
+.todo-item:hover{background:var(--bg);border-color:var(--border)}
+.todo-item.dragging{opacity:.5;border-color:var(--blue)}
+.todo-item.scheduled{opacity:.6}
+.todo-chk{width:15px;height:15px;border:1.5px solid #ccc;border-radius:4px;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:9px;cursor:pointer}
+.todo-chk.done{background:var(--green);border-color:var(--green);color:#fff}
+.todo-name{flex:1;font-size:13px;line-height:1.3}
+.todo-name.done{text-decoration:line-through;color:var(--text3)}
+.todo-time{font-size:11px;color:var(--text3);flex-shrink:0}
+
+/* Timeline */
+.timeline-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;position:relative}
+.tl-inner{position:relative;overflow:hidden}
+.tl-row{display:flex;min-height:30px;border-bottom:1px solid var(--border);position:relative}
+.tl-row.half{min-height:30px;border-bottom:1px dashed #f0ede8}
+.tl-row:last-child{border-bottom:none}
+.tl-row.is-now{background:#fffbf0}
+.tl-hour{width:52px;flex-shrink:0;font-size:11px;color:var(--text3);font-weight:500;padding:6px 8px 0;text-align:right;border-right:1px solid var(--border)}
+.tl-hour.half-lbl{font-size:10px;color:#ccc;padding-top:6px}
+.tl-slot{flex:1;padding:2px 6px;position:relative;min-height:30px}
+.tl-slot.drop-target{background:#E6F1FB44}
+.tl-block{position:absolute;left:6px;right:6px;border-radius:6px;cursor:grab;overflow:visible;z-index:2;min-height:26px;display:flex;flex-direction:column;justify-content:center;padding:3px 7px;font-size:12px;font-weight:500;box-shadow:0 1px 4px rgba(0,0,0,.1);transition:box-shadow .15s,outline .1s;user-select:none}
+.tl-block.selected{outline:2px solid var(--blue);outline-offset:1px;z-index:10}
+.ctx-menu{position:fixed;background:var(--card);border:1px solid var(--border2);border-radius:10px;box-shadow:0 4px 20px rgba(0,0,0,.18);z-index:1000;min-width:140px;overflow:hidden;animation:ctx-in .1s ease}
+@keyframes ctx-in{from{opacity:0;transform:scale(.95)}to{opacity:1;transform:scale(1)}}
+.ctx-item{padding:9px 14px;font-size:13px;cursor:pointer;display:flex;align-items:center;gap:8px;color:var(--text)}
+.ctx-item:hover{background:var(--bg)}
+.ctx-item.danger{color:var(--red)}
+.ctx-item.danger:hover{background:#fff0f0}
+.todo-item{position:relative;overflow:hidden}
+.todo-swipe-bg{position:absolute;right:0;top:0;bottom:0;width:0;background:var(--red);display:flex;align-items:center;justify-content:flex-end;padding-right:12px;color:#fff;font-size:12px;font-weight:600;transition:width .2s;border-radius:7px;overflow:hidden}
+.todo-inner{display:flex;align-items:center;gap:8px;flex:1;background:inherit;border-radius:7px;position:relative;z-index:1}
+.todo-more{width:24px;height:24px;border:none;background:none;cursor:pointer;color:var(--text3);font-size:16px;display:flex;align-items:center;justify-content:center;border-radius:5px;flex-shrink:0;padding:0}
+.todo-more:hover{background:var(--bg);color:var(--text)}
+.tl-block:hover{box-shadow:0 2px 8px rgba(0,0,0,.15)}
+.tl-block.dragging-block{opacity:.7;box-shadow:0 4px 16px rgba(0,0,0,.2)}
+.tl-block-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:600}
+.tl-block-time{font-size:10px;opacity:.75}
+.tl-block-resize{position:absolute;bottom:0;left:0;right:0;height:14px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.12));border-radius:0 0 6px 6px}
+.tl-now-wrap{position:absolute;left:0;right:0;pointer-events:none;z-index:5}
+.tl-now-line{position:absolute;left:52px;right:0;height:2px;background:var(--red)}
+.tl-now-circle{position:absolute;left:46px;width:8px;height:8px;border-radius:50%;background:var(--red);top:-3px}
+.tl-add{position:absolute;inset:0;cursor:pointer;z-index:1}
+
+/* Weekly */
+.weekly-split{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start}
+@media(max-width:700px){.weekly-split{grid-template-columns:1fr}}
+.weekly-todo-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;position:sticky;top:10px;max-height:calc(100vh - 160px);overflow-y:auto}
+.weekly-tl-panel{}
+.weekly-tl-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:auto}
+.weekly-grid{display:grid;min-width:600px}
+.weekly-header{display:grid;border-bottom:1px solid var(--border)}
+.weekly-day-hd{font-size:12px;font-weight:600;text-align:center;padding:8px 4px;border-right:1px solid var(--border);color:var(--text2)}
+.weekly-day-hd:last-child{border-right:none}
+.weekly-day-hd.today-col{color:var(--blue)}
+.weekly-body{display:grid}
+.weekly-row{display:grid;border-bottom:1px solid var(--border)}
+.weekly-row.half-row{border-bottom:1px dashed #f0ede8}
+.weekly-time-col{font-size:10px;color:var(--text3);padding:5px 6px 0;text-align:right;border-right:1px solid var(--border);min-width:44px}
+.weekly-cell{border-right:1px solid var(--border);min-height:30px;position:relative;cursor:pointer}
+.weekly-cell:last-child{border-right:none}
+.weekly-cell:hover{background:#f7f6f2}
+.weekly-block{position:absolute;left:2px;right:2px;border-radius:4px;padding:2px 4px;font-size:10px;font-weight:600;overflow:hidden;z-index:2;cursor:pointer;white-space:nowrap;text-overflow:ellipsis}
+
 /* Report */
 .report-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
 @media(max-width:680px){.report-grid{grid-template-columns:1fr 1fr}}
@@ -289,6 +372,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
       <button class="ntab" onclick="switchTab('list')">목록</button>
       <button class="ntab" onclick="switchTab('cal')">캘린더</button>
       <button class="ntab" onclick="switchTab('daily')">데일리</button>
+      <button class="ntab" onclick="switchTab('weekly')">위클리</button>
       <button class="ntab" onclick="switchTab('report')">리포트</button>
       <button class="ntab" onclick="switchTab('projects')">프로젝트</button>
     </div>
@@ -314,27 +398,49 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     <div class="cg-full" id="cal-grid"></div>
   </div>
   <div id="view-daily" class="view">
-    <div class="daily-date" id="daily-date"></div>
-    <div class="daily-layout">
-      <div>
-        <div class="daily-sub-tabs">
-          <button class="dstab active" onclick="switchDailyTab('tasks')">작업 목록</button>
-          <button class="dstab" onclick="switchDailyTab('timeline')">시간표</button>
+    <div class="daily-nav">
+      <button class="dnav-btn" onclick="changeDailyDate(-1)">&#8249;</button>
+      <span class="daily-date-label" id="daily-date-label"></span>
+      <button class="dnav-btn" onclick="changeDailyDate(1)">&#8250;</button>
+      <button class="dnav-today" onclick="goToday()">오늘</button>
+    </div>
+    <div class="daily-split">
+      <!-- Left: Todo list -->
+      <div class="daily-todo-panel">
+        <div class="sec-title">작업 목록</div>
+        <div class="todo-input-wrap">
+          <input class="todo-input" id="todo-input" placeholder="새 작업 입력 후 엔터..." onkeydown="onTodoEnter(event)">
         </div>
-        <div id="daily-tasks-view"><div class="daily-tasks" id="daily-tasks"></div></div>
-        <div id="daily-timeline-view" style="display:none">
-          <div class="timeline-wrap"><div class="tl-inner" id="tl-inner"></div></div>
-        </div>
+        <div class="todo-list" id="daily-todo-list"></div>
       </div>
-      <div>
-        <div class="sec-title">시간 요약</div>
-        <div class="time-summary">
-          <div class="time-total"><div class="time-total-n" id="daily-total">0m</div><div class="time-total-l">오늘 계획 시간</div></div>
-          <div id="daily-bars"></div>
+      <!-- Right: Timeline -->
+      <div class="daily-tl-panel">
+        <div class="sec-title">시간표</div>
+        <div class="timeline-wrap" id="daily-tl-wrap">
+          <div class="tl-inner" id="tl-inner"></div>
         </div>
       </div>
     </div>
   </div>
+
+  <div id="view-weekly" class="view">
+    <div class="daily-nav">
+      <button class="dnav-btn" onclick="changeWeek(-1)">&#8249;</button>
+      <span class="daily-date-label" id="weekly-label"></span>
+      <button class="dnav-btn" onclick="changeWeek(1)">&#8250;</button>
+      <button class="dnav-today" onclick="goWeekToday()">이번 주</button>
+    </div>
+    <div class="weekly-split">
+      <div class="weekly-todo-panel">
+        <div class="sec-title" style="margin-bottom:10px">이번 주 작업</div>
+        <div class="todo-list" id="weekly-todo-list"></div>
+      </div>
+      <div class="weekly-tl-panel">
+        <div class="weekly-tl-wrap" id="weekly-tl-wrap"></div>
+      </div>
+    </div>
+  </div>
+
   <div id="view-report" class="view">
     <div class="report-grid" id="report-grid"></div>
     <div class="report-log"><div class="sec-title" style="margin-bottom:12px">전체 시간 기록</div><div id="report-log"></div></div>
@@ -649,14 +755,14 @@ function getAncestors(id){const res=[];let t=tasks.find(t=>t.id===id);while(t&&t
 
 // ── Tab ───────────────────────────────────────────────────
 function switchTab(tab){
-  document.querySelectorAll('.ntab').forEach((el,i)=>el.classList.toggle('active',['board','list','cal','daily','report','projects'][i]===tab));
+  document.querySelectorAll('.ntab').forEach((el,i)=>el.classList.toggle('active',['board','list','cal','daily','weekly','report','projects'][i]===tab));
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
   document.getElementById('view-'+tab).classList.add('active');
-  document.getElementById('proj-filter').style.display=['board','list','cal'].includes(tab)?'flex':'none';
+  document.getElementById('proj-filter').style.display=['board','list','cal','daily','weekly'].includes(tab)?'flex':'none';
   renderAll();
 }
 
-function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree();renderCal();renderDaily();renderReport();renderProjList();}
+function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree();renderCal();renderDaily();renderWeekly();renderReport();renderProjList();}
 
 // ── Proj Filter ───────────────────────────────────────────
 function renderProjFilter(){
@@ -806,125 +912,392 @@ function changeMonth(d){
   if(accessToken) fetchGcalEvents(); else renderCal();
 }
 
-// ── Daily ─────────────────────────────────────────────────
-let dailyTab = 'tasks';
-function switchDailyTab(t){
-  dailyTab=t;
-  document.querySelectorAll('.dstab').forEach((el,i)=>el.classList.toggle('active',['tasks','timeline'][i]===t));
-  document.getElementById('daily-tasks-view').style.display=t==='tasks'?'block':'none';
-  document.getElementById('daily-timeline-view').style.display=t==='timeline'?'block':'none';
-  if(t==='timeline') renderTimeline();
-}
+// ── Daily & Weekly ──────────────────────────────────────────
+let dailyDate = new Date(); // currently viewed date
+let weekOffset = 0; // week offset from current week
+const SLOT_H = 30; // px per 30-min slot
+const SLOTS_PER_HOUR = 2;
 
+function dailyDateStr(d){ return d.toISOString().split('T')[0]; }
+function changeDailyDate(d){ dailyDate=new Date(dailyDate); dailyDate.setDate(dailyDate.getDate()+d); renderDaily(); }
+function goToday(){ dailyDate=new Date(); renderDaily(); }
+function changeWeek(d){ weekOffset+=d; renderWeekly(); }
+function goWeekToday(){ weekOffset=0; renderWeekly(); }
+
+function fmtHM(h,m){ return String(h).padStart(2,'0')+':'+String(m||0).padStart(2,'0'); }
+function slotToMins(slot){ return slot*30; } // slot index → minutes from midnight
+function minsToSlot(mins){ return Math.floor(mins/30); }
+function minsToTop(mins){ return (mins/30)*SLOT_H; }
+function topToMins(top){ return Math.round(top/SLOT_H)*30; }
+
+// ── Render Daily ──────────────────────────────────────────
 function renderDaily(){
-  const today=todayStr(); const d=new Date();
-  document.getElementById('daily-date').textContent=`${d.getFullYear()}년 ${d.getMonth()+1}월 ${d.getDate()}일 (${['일','월','화','수','목','금','토'][d.getDay()]}요일)`;
-  const todayTasks=tasks.filter(t=>t.due===today||t.status==='doing');
-  let total=0; const pm={};
-  todayTasks.forEach(t=>{total+=(t.plannedTime||0);pm[t.projId]=(pm[t.projId]||0)+(t.plannedTime||0);});
-  document.getElementById('daily-total').textContent=fmtMins(total)||'0m';
-  document.getElementById('daily-tasks').innerHTML=todayTasks.length===0?
-    '<div style="font-size:13px;color:var(--text3);padding:20px 0;text-align:center">오늘 마감이거나 진행 중인 작업이 없어요</div>':
-    todayTasks.map(t=>{const p=getProj(t.projId);return`
-    <div class="dtask">
-      <div class="chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
-      <div class="dtask-info" onclick="openPanel(${t.id})" style="cursor:pointer">
-        <div class="dtask-name">${t.name}</div>
-        <div class="dtask-proj"><span style="width:6px;height:6px;border-radius:50%;background:${p.color};display:inline-block"></span>${p.name}</div>
-      </div>
-      <input class="time-input" type="number" min="0" value="${t.plannedTime||0}" onchange="updateTime(${t.id},this.value)" onclick="event.stopPropagation()">
-      <span class="time-lbl">분</span>
-    </div>`;}).join('');
-  const maxM=Math.max(...Object.values(pm),1);
-  document.getElementById('daily-bars').innerHTML=Object.entries(pm).map(([pid,m])=>{const p=getProj(parseInt(pid));return`
-    <div class="proj-bar-row">
-      <div class="proj-bar-name">${p.icon} ${p.name}</div>
-      <div class="proj-bar-wrap"><div class="proj-bar-fill" style="width:${(m/maxM*100).toFixed(0)}%;background:${p.color}"></div></div>
-      <div class="proj-bar-n">${fmtMins(m)}</div>
-    </div>`;}).join('');
-  if(dailyTab==='timeline') renderTimeline();
+  const ds=dailyDateStr(dailyDate);
+  const d=dailyDate;
+  const days=['일','월','화','수','목','금','토'];
+  const isToday=ds===todayStr();
+  document.getElementById('daily-date-label').textContent=
+    d.getFullYear()+'년 '+(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+days[d.getDay()]+')'+(isToday?' — 오늘':'');
+
+  // Todo list: tasks due today or in-progress
+  const dayTasks=tasks.filter(t=>t.due===ds||(t.status==='doing'&&!t.due));
+  renderDailyTodo(dayTasks);
+  renderDailyTimeline(ds, dayTasks);
 }
 
-function renderTimeline(){
-  const today=todayStr();
-  const todayTasks=tasks.filter(t=>t.due===today||t.status==='doing');
-  const now=new Date();
-  const nowH=now.getHours(), nowMin=now.getMinutes();
-  const HOURS=Array.from({length:24},(_,i)=>i);
-  const nowPx=nowH*54+(nowMin/60)*54;
-
-  let html='';
-  HOURS.forEach(h=>{
-    const isNow=h===nowH;
-    const hLabel=h===0?'오전 12시':h<12?`오전 ${h}시`:h===12?'오후 12시':`오후 ${h-12}시`;
-
-    // PM tasks
-    const slotTasks=todayTasks.filter(t=>(t.startHour??-1)===h);
-    const tasksHtml=slotTasks.map(t=>{
-      const p=getProj(t.projId);
-      const dur=t.plannedTime?fmtMins(t.plannedTime):'';
-      const isDone=t.status==='done';
-      return `<div class="tl-event" style="background:${p.color}18;border:1px solid ${p.color}44" onclick="openPanel(${t.id})">
-        <div class="tl-evt-chk ${isDone?'done':''}" onclick="quickToggle(${t.id},event)" style="border-color:${p.color}88;${isDone?'background:'+p.color+'55':''}">✓</div>
-        <div class="tl-evt-name" style="color:${p.color}">${isDone?'<s>'+t.name+'</s>':t.name}</div>
-        ${dur?`<div class="tl-evt-dur" style="color:${p.color}">${dur}</div>`:''}
-      </div>`;
-    }).join('');
-
-    // Google Calendar events
-    const gcalSlot=gcalEvents.filter(e=>{
-      if(!e.start.dateTime) return false; // all-day skip per-hour (handled separately)
-      const eH=new Date(e.start.dateTime).getHours();
-      return eH===h;
-    });
-    const gcalHtml=gcalSlot.map(e=>{
-      const start=new Date(e.start.dateTime);
-      const end=e.end?.dateTime?new Date(e.end.dateTime):null;
-      const dur=end?Math.round((end-start)/60000):null;
-      const timeStr=start.getHours().toString().padStart(2,'0')+':'+start.getMinutes().toString().padStart(2,'0');
-      const ec=e._calColor||'#4285f4';
-      return `<div class="tl-event" style="background:${ec}22;border-left:3px solid ${ec};border-top:1px solid ${ec}33;border-right:1px solid ${ec}33;border-bottom:1px solid ${ec}33" title="${e.summary}">
-        <div class="tl-evt-name" style="color:${ec};font-weight:600">${e.summary||'(제목 없음)'}</div>
-        <div class="tl-evt-dur" style="color:${ec};opacity:.8">${timeStr}${dur?' · '+fmtMins(dur):''}</div>
-      </div>`;
-    }).join('');
-
-    // All-day gcal events (show at top of 0시)
-    const allDayHtml=h===0?gcalEvents.filter(e=>e.start.date&&!e.start.dateTime).map(e=>`
-      <div class="tl-event" style="background:#FFF9C4;border:1px solid #F9A825">
-        <span style="font-size:11px;color:#F57F17">🗓</span>
-        <div class="tl-evt-name" style="color:#E65100">${e.summary||'(종일 일정)'}</div>
-        <div class="tl-evt-dur" style="color:#F57F17">종일</div>
-      </div>`).join(''):'';
-
-    html+=`<div class="tl-row ${isNow?'is-now':''}" id="tl-h-${h}">
-      <div class="tl-hour">${hLabel}</div>
-      <div class="tl-slot">
-        ${allDayHtml}${gcalHtml}${tasksHtml}
-        <button class="tl-add" onclick="addTaskAtHour(${h})">+ 작업 추가</button>
+function renderDailyTodo(dayTasks){
+  const list=document.getElementById('daily-todo-list');
+  if(dayTasks.length===0){list.innerHTML='<div style="font-size:12px;color:var(--text3);padding:12px 0;text-align:center">일정 없음</div>';return;}
+  list.innerHTML=dayTasks.map(t=>{
+    const scheduled=t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='';
+    const timeStr=scheduled?fmtHM(t.startHour,t.startMin||0):'';
+    return`<div class="todo-item${scheduled?' scheduled':''}" data-id="${t.id}" draggable="true"
+      ondragstart="onTodoDragStart(event,${t.id})">
+      <div class="todo-swipe-bg" id="swipe-bg-${t.id}">삭제</div>
+      <div class="todo-inner">
+        <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
+        <span class="todo-name ${t.status==='done'?'done':''}" onclick="openPanel(${t.id})" style="flex:1">${t.name}</span>
+        ${timeStr?`<span class="todo-time">${timeStr}</span>`:''}
+        <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
       </div>
     </div>`;
+  }).join('');
+  // Attach touch swipe handlers
+  list.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
+}
+
+function attachSwipe(el){
+  let startX=0,curX=0,swiping=false;
+  const id=parseInt(el.dataset.id);
+  const inner=el.querySelector('.todo-inner');
+  const bg=el.querySelector('.todo-swipe-bg');
+  el.addEventListener('touchstart',e=>{startX=e.touches[0].clientX;swiping=true;},{passive:true});
+  el.addEventListener('touchmove',e=>{
+    if(!swiping)return;
+    curX=e.touches[0].clientX;
+    const dx=Math.min(0,curX-startX);
+    if(dx<-10){
+      inner.style.transform=`translateX(${Math.max(-80,dx)}px)`;
+      bg.style.width=Math.min(80,-dx)+'px';
+    }
+  },{passive:true});
+  el.addEventListener('touchend',()=>{
+    if(startX-curX>60){
+      // Swipe confirmed — delete
+      el.style.transition='opacity .2s';el.style.opacity='0';
+      setTimeout(()=>{quickDeleteTask(id);},200);
+    } else {
+      inner.style.transform='';bg.style.width='0';
+    }
+    swiping=false;
+  });
+}
+
+function renderDailyTimeline(ds, dayTasks){
+  const wrap=document.getElementById('tl-inner');
+  const now=new Date();
+  const isToday=ds===todayStr();
+  const nowH=now.getHours(), nowMin=now.getMinutes();
+
+  // Build 24h × 2 slots
+  let html='';
+  for(let h=0;h<24;h++){
+    for(let half=0;half<2;half++){
+      const isNowSlot=isToday&&h===nowH&&(half===0?nowMin<30:nowMin>=30);
+      const hLabel=half===0?(h===0?'오전 12':h<12?`오전 ${h}`:h===12?'오후 12':`오후 ${h-12}`):'';
+      html+=`<div class="tl-row${half===1?' half':''}${isNowSlot?' is-now':''}" 
+        data-h="${h}" data-half="${half}"
+        ondragover="event.preventDefault();this.querySelector('.tl-slot').classList.add('drop-target')"
+        ondragleave="this.querySelector('.tl-slot').classList.remove('drop-target')"
+        ondrop="onSlotDrop(event,${h},${half})">
+        <div class="tl-hour${half===1?' half-lbl':''}">${hLabel}${half===1?'30':''}</div>
+        <div class="tl-slot" onclick="onSlotClick(${h},${half})"></div>
+      </div>`;
+    }
+  }
+
+  // Now line
+  if(isToday){
+    const nowPx=minsToTop(nowH*60+nowMin);
+    html+=`<div class="tl-now-wrap" style="top:${nowPx}px"><div class="tl-now-circle"></div><div class="tl-now-line"></div></div>`;
+  }
+  wrap.innerHTML=html;
+
+  // Render task blocks
+  dayTasks.filter(t=>t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='').forEach(t=>{
+    renderTaskBlock(t, wrap);
   });
 
-  const nowLine=`<div class="tl-now-wrap" style="top:${nowPx}px">
-    <div class="tl-now-circle"></div><div class="tl-now-line"></div>
+  // Render gcal blocks for this day
+  gcalEvents.filter(e=>{
+    const ed=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
+    return ed===ds&&e.start.dateTime;
+  }).forEach(e=>{
+    renderGcalBlock(e, wrap);
+  });
+
+  // Scroll to 8am or now
+  const scrollTo=isToday?Math.max(0,minsToTop(nowH*60+nowMin)-100):minsToTop(8*60);
+  setTimeout(()=>{ const w=document.getElementById('daily-tl-wrap'); if(w) w.scrollTop=scrollTo; },50);
+}
+
+function renderTaskBlock(t, container){
+  const startMins=(t.startHour||0)*60+(t.startMin||0);
+  const dur=t.plannedTime||60;
+  const top=minsToTop(startMins);
+  const height=Math.max(26, (dur/30)*SLOT_H);
+  const p=getProj(t.projId);
+
+  const el=document.createElement('div');
+  el.className='tl-block';
+  el.id='tl-block-'+t.id;
+  el.style.cssText=`top:${top}px;height:${height}px;background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};left:58px;right:6px;position:absolute`;
+  el.draggable=true;
+  el.innerHTML=`<div class="tl-block-name">${t.name}</div><div class="tl-block-time">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div><div class="tl-block-resize" data-id="${t.id}"></div>`;
+  
+  // Drag to move
+  el.setAttribute('draggable','true');
+  el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('blockId',String(t.id)); e.dataTransfer.setData('type','move'); selectedBlockId=t.id; e.stopPropagation(); });
+  // Click to select
+  el.addEventListener('click', e=>{
+    e.stopPropagation();
+    if(selectedBlockId===t.id){ openPanel(t.id); }
+    else { selectBlock(t.id); }
+  });
+  // Right-click context menu
+  el.addEventListener('contextmenu', e=>{ e.preventDefault(); e.stopPropagation(); showCtxMenu(e,t.id,'block'); });
+  // Resize handle
+  const resizeHandle=el.querySelector('.tl-block-resize');
+  resizeHandle.addEventListener('mousedown', e=>{ e.stopPropagation(); e.preventDefault(); startResize(e, t.id, el); });
+
+  container.appendChild(el);
+}
+
+function renderGcalBlock(e, container){
+  const start=new Date(e.start.dateTime);
+  const end=e.end?.dateTime?new Date(e.end.dateTime):new Date(start.getTime()+3600000);
+  const startMins=start.getHours()*60+start.getMinutes();
+  const dur=Math.round((end-start)/60000);
+  const top=minsToTop(startMins);
+  const height=Math.max(26,(dur/30)*SLOT_H);
+  const color=e._calColor||'#4285f4';
+
+  const el=document.createElement('div');
+  el.className='tl-block';
+  el.style.cssText=`top:${top}px;height:${height}px;background:${color}22;border:1.5px solid ${color}55;color:${color};left:58px;right:6px;position:absolute;cursor:default`;
+  el.innerHTML=`<div class="tl-block-name">📅 ${e.summary||'(일정)'}</div><div class="tl-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>`;
+  container.appendChild(el);
+}
+
+// ── Selection & Keyboard ─────────────────────────────────
+let selectedBlockId=null;
+function selectBlock(id){
+  // Deselect previous
+  document.querySelectorAll('.tl-block.selected').forEach(el=>el.classList.remove('selected'));
+  selectedBlockId=id;
+  const el=document.getElementById('tl-block-'+id);
+  if(el) el.classList.add('selected');
+}
+document.addEventListener('keydown',e=>{
+  if((e.key==='Delete'||e.key==='Backspace')&&selectedBlockId!==null){
+    // Don't fire when typing in an input
+    if(['INPUT','TEXTAREA'].includes(document.activeElement.tagName)) return;
+    e.preventDefault();
+    quickDeleteTask(selectedBlockId);
+    selectedBlockId=null;
+  }
+});
+// Click outside deselects
+document.addEventListener('click',()=>{
+  document.querySelectorAll('.tl-block.selected').forEach(el=>el.classList.remove('selected'));
+  selectedBlockId=null;
+  hideCtxMenu();
+});
+
+// ── Context Menu ──────────────────────────────────────────
+let ctxMenu=null;
+function showCtxMenu(e,id,type){
+  e.stopPropagation();
+  hideCtxMenu();
+  const t=tasks.find(t=>t.id===id);
+  const menu=document.createElement('div');
+  menu.className='ctx-menu';
+  menu.id='ctx-menu';
+  const items=[
+    {label:'✏️ 편집',action:()=>{openPanel(id);hideCtxMenu();}},
+    {label:'⏰ 시간 설정',action:()=>{openPanel(id);hideCtxMenu();},show:type==='task'},
+    {label:t?.status==='done'?'↩️ 미완료로':'✅ 완료',action:()=>{quickToggle(id,{stopPropagation:()=>{}});hideCtxMenu();}},
+    {label:'🗑️ 삭제',danger:true,action:()=>{quickDeleteTask(id);hideCtxMenu();}},
+  ].filter(i=>i.show!==false);
+  menu.innerHTML=items.map((item,i)=>`<div class="ctx-item${item.danger?' danger':''}" data-idx="${i}">${item.label}</div>`).join('');
+  document.body.appendChild(menu);
+  ctxMenu=menu;
+  // Position
+  const x=Math.min(e.clientX, window.innerWidth-160);
+  const y=Math.min(e.clientY, window.innerHeight-160);
+  menu.style.left=x+'px';menu.style.top=y+'px';
+  // Wire actions
+  menu.querySelectorAll('.ctx-item').forEach((el,i)=>{
+    el.addEventListener('click',e=>{e.stopPropagation();items[i].action();});
+  });
+}
+function hideCtxMenu(){if(ctxMenu){ctxMenu.remove();ctxMenu=null;}}
+
+function quickDeleteTask(id){
+  const toDelete=[id,...allDescendants(id).map(t=>t.id)];
+  tasks=tasks.filter(t=>!toDelete.includes(t.id));
+  saveLocal();scheduleSave();renderDaily();renderWeekly();renderBoard();renderTree();renderStats();
+  showToast('삭제됐어요');
+}
+
+// ── Drag & Drop ───────────────────────────────────────────
+let dragTaskId=null;
+function onTodoDragStart(e, id){ e.dataTransfer.setData('taskId',id); e.dataTransfer.setData('type','todo'); dragTaskId=id; }
+function onSlotDrop(e, h, half){
+  e.preventDefault();
+  e.currentTarget.querySelector('.tl-slot').classList.remove('drop-target');
+  const type=e.dataTransfer.getData('type');
+  const id=parseInt(e.dataTransfer.getData(type==='move'?'blockId':'taskId'));
+  const t=tasks.find(t=>t.id===id); if(!t) return;
+  const mins=h*60+(half?30:0);
+  t.startHour=h; t.startMin=half?30:0;
+  if(!t.plannedTime) t.plannedTime=60;
+  saveLocal(); scheduleSave();
+  renderDaily();
+}
+function onSlotClick(h, half){
+  // Quick add task at this time
+  const ds=dailyDateStr(dailyDate);
+  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'etc',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0};
+  tasks.unshift(newTask);
+  saveLocal(); scheduleSave(); renderDaily();
+  setTimeout(()=>openPanel(newTask.id),50);
+}
+
+// ── Resize ────────────────────────────────────────────────
+function startResize(e, taskId, el){
+  const startY=e.clientY;
+  const t=tasks.find(t=>t.id===taskId); if(!t) return;
+  const startDur=t.plannedTime||60;
+  function onMove(ev){
+    const dy=ev.clientY-startY;
+    const newDur=Math.max(30, Math.round((startDur+dy/SLOT_H*30)/30)*30);
+    t.plannedTime=newDur;
+    el.style.height=Math.max(26,(newDur/30)*SLOT_H)+'px';
+    el.querySelector('.tl-block-time').textContent=fmtHM(t.startHour,t.startMin||0)+' · '+fmtMins(newDur);
+  }
+  function onUp(){
+    document.removeEventListener('mousemove',onMove);
+    document.removeEventListener('mouseup',onUp);
+    saveLocal(); scheduleSave(); renderDaily();
+  }
+  document.addEventListener('mousemove',onMove);
+  document.addEventListener('mouseup',onUp);
+}
+
+// ── Todo Enter ────────────────────────────────────────────
+function onTodoEnter(e){
+  if(e.key!=='Enter') return;
+  const input=document.getElementById('todo-input');
+  const name=input.value.trim(); if(!name) return;
+  const ds=dailyDateStr(dailyDate);
+  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'etc',priority:'mid',due:ds,plannedTime:0};
+  tasks.unshift(newTask);
+  input.value='';
+  saveLocal(); scheduleSave(); renderDaily();
+}
+
+// ── Weekly ────────────────────────────────────────────────
+function getWeekDates(){
+  const now=new Date();
+  const dow=now.getDay();
+  const monday=new Date(now); monday.setDate(now.getDate()-dow+1+(weekOffset*7));
+  return Array.from({length:7},(_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return d; });
+}
+
+function renderWeekly(){
+  const dates=getWeekDates();
+  const startStr=`${dates[0].getMonth()+1}/${dates[0].getDate()}`;
+  const endStr=`${dates[6].getMonth()+1}/${dates[6].getDate()}`;
+  document.getElementById('weekly-label').textContent=`${dates[0].getFullYear()}년 ${startStr} - ${endStr}`;
+
+  const dayNames=['일','월','화','수','목','금','토'];
+  const todayS=todayStr();
+
+  // Weekly todo: all tasks this week
+  const weekStrs=dates.map(d=>dailyDateStr(d));
+  const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||t.status==='doing');
+  document.getElementById('weekly-todo-list').innerHTML=weekTasks.length===0
+    ?'<div style="font-size:12px;color:var(--text3)">이번 주 작업 없음</div>'
+    :weekTasks.map(t=>`<div class="todo-item" onclick="openPanel(${t.id})">
+      <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
+      <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px">${t.name}</span>
+    </div>`).join('');
+
+  // Weekly timeline grid
+  const COLS=dates.length;
+  const colW=`repeat(${COLS},1fr)`;
+  let html=`<div class="weekly-grid">`;
+
+  // Header
+  html+=`<div class="weekly-header" style="display:grid;grid-template-columns:44px ${colW}">
+    <div class="weekly-time-col"></div>
+    ${dates.map(d=>{
+      const isT=dailyDateStr(d)===todayS;
+      return`<div class="weekly-day-hd${isT?' today-col':''}">${dayNames[d.getDay()]} ${d.getDate()}</div>`;
+    }).join('')}
   </div>`;
 
-  document.getElementById('tl-inner').innerHTML=html+nowLine;
-  setTimeout(()=>{const row=document.getElementById('tl-h-'+nowH);if(row)row.scrollIntoView({block:'center',behavior:'smooth'});},100);
+  // Body rows: 24h × 2
+  for(let h=0;h<24;h++){
+    for(let half=0;half<2;half++){
+      const lbl=half===0?(h===0?'12':h<12?`${h}`:h===12?'12':`${h-12}`):'';
+      const ampm=half===0?(h<12?'am':'pm'):'';
+      html+=`<div class="weekly-row${half?'  half-row':''}" style="display:grid;grid-template-columns:44px ${colW}">
+        <div class="weekly-time-col">${half===0?lbl+ampm:''}</div>
+        ${dates.map((d,di)=>{
+          const ds=dailyDateStr(d);
+          // tasks at this slot
+          const slotTasks=tasks.filter(t=>t.due===ds&&(t.startHour===h)&&((t.startMin||0)===( half?30:0)));
+          const gcalSlot=gcalEvents.filter(e=>{
+            if(!e.start.dateTime) return false;
+            const sd=new Date(e.start.dateTime);
+            return dailyDateStr(sd)===ds&&sd.getHours()===h&&(half?sd.getMinutes()>=30:sd.getMinutes()<30);
+          });
+          const evHtml=slotTasks.map(t=>{const p=getProj(t.projId);return`<div class="weekly-block" style="background:${p.color}22;color:${p.color};border-left:2px solid ${p.color}" draggable="true" ondragstart="onWeeklyBlockDrag(event,${t.id})" onclick="event.stopPropagation();openPanel(${t.id})" oncontextmenu="event.preventDefault();event.stopPropagation();showCtxMenu(event,${t.id},'block')">${t.name}</div>`;}).join('')
+            +gcalSlot.map(e=>{const c=e._calColor||'#4285f4';return`<div class="weekly-block" style="background:${c}22;color:${c};border-left:2px solid ${c}">${e.summary||''}</div>`;}).join('');
+          return`<div class="weekly-cell" ondragover="event.preventDefault()" ondrop="onWeeklyCellDrop(event,'${ds}',${h},${half})" onclick="onWeekCellClick('${ds}',${h},${half})">${evHtml}</div>`;
+        }).join('')}
+      </div>`;
+    }
+  }
+  html+='</div>';
+  document.getElementById('weekly-tl-wrap').innerHTML=html;
+
+  // Scroll to 8am
+  setTimeout(()=>{ const w=document.getElementById('weekly-tl-wrap'); if(w) w.scrollTop=minsToTop(8*60); },50);
 }
 
-function addTaskAtHour(hour){
-  const today=todayStr();
-  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'etc',priority:'mid',due:today,plannedTime:60,startHour:hour};
+function onWeekCellClick(ds,h,half){
+  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'etc',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0};
   tasks.unshift(newTask);
-  syncTaskToGcal(newTask);
-  saveLocal();scheduleSave();renderAll();
-  openPanel(newTask.id);
+  saveLocal(); scheduleSave(); renderWeekly();
+  setTimeout(()=>openPanel(newTask.id),50);
 }
-
-function quickToggle(id,e){e.stopPropagation();const t=tasks.find(t=>t.id===id);if(t)t.status=t.status==='done'?'todo':'done';saveLocal();scheduleSave();renderAll();}
-function updateTime(id,val){const t=tasks.find(t=>t.id===id);if(t)t.plannedTime=parseInt(val)||0;saveLocal();scheduleSave();syncTaskToGcal(t);renderDaily();}
+function onWeeklyBlockDrag(e,id){
+  e.dataTransfer.setData('blockId',String(id));
+  e.dataTransfer.setData('type','move');
+  e.stopPropagation();
+}
+function onWeeklyCellDrop(e,ds,h,half){
+  e.preventDefault();
+  const id=parseInt(e.dataTransfer.getData('blockId'));
+  if(!id) return;
+  const t=tasks.find(t=>t.id===id); if(!t) return;
+  t.due=ds; t.startHour=h; t.startMin=half?30:0;
+  if(!t.plannedTime) t.plannedTime=60;
+  saveLocal(); scheduleSave(); renderWeekly(); renderDaily();
+}
 
 // ── Report ────────────────────────────────────────────────
 function renderReport(){
@@ -1113,6 +1486,7 @@ function deleteProject(){
 
 // ── Init ──────────────────────────────────────────────────
 loadLocal();renderAll();
+dailyDate=new Date();
 document.getElementById('proj-filter').style.display='flex';
 // Auto-restore session from sessionStorage
 (async()=>{
@@ -1122,6 +1496,7 @@ document.getElementById('proj-filter').style.display='flex';
     setSyncStatus('syncing','동기화 중...');
     await loadFromDrive();
     await fetchGcalEvents();
+    renderDaily();renderWeekly();
   }
 })();
 </script>
