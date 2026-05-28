@@ -65,6 +65,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .col-head{font-size:11px;font-weight:700;color:#999;margin-bottom:9px;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.06em}
 .col-cnt{background:var(--card);border-radius:10px;padding:1px 7px;font-size:11px;color:var(--text2)}
 .card{background:var(--card);border:1px solid var(--border);border-radius:var(--r);padding:10px 12px;margin-bottom:7px;cursor:pointer;transition:all .15s}
+.card-done{opacity:.6}
 .card:last-child{margin-bottom:0}
 .card:hover{border-color:#a8c8e8;box-shadow:0 2px 8px rgba(55,138,221,.1)}
 .card-proj{font-size:10px;font-weight:600;margin-bottom:4px;display:flex;align-items:center;gap:4px}
@@ -332,9 +333,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .field input,.field select,.field textarea{width:100%;font-size:13px;padding:8px 10px;border:1px solid var(--border2);border-radius:7px;background:#fafaf8;color:var(--text);font-family:inherit;outline:none;transition:border-color .15s}
 .field input:focus,.field select:focus,.field textarea:focus{border-color:var(--blue)}
 .field textarea{resize:vertical;min-height:55px}
-.icon-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;margin-top:4px}
-.icon-opt{width:34px;height:34px;border-radius:7px;border:1.5px solid var(--border);background:var(--bg);cursor:pointer;font-size:17px;display:flex;align-items:center;justify-content:center;transition:all .15s}
-.icon-opt.sel{border-color:var(--blue);background:#E6F1FB}
+.icon-picker-btn{font-size:28px;width:52px;height:52px;border-radius:10px;border:1.5px solid var(--border2);background:var(--bg);cursor:pointer;display:flex;align-items:center;justify-content:center;transition:all .15s;position:relative}
+.icon-picker-btn:hover{border-color:var(--blue);background:#E6F1FB}
+.emoji-input{position:absolute;opacity:0;width:1px;height:1px;pointer-events:none}
 .color-grid{display:grid;grid-template-columns:repeat(8,1fr);gap:5px;margin-top:4px}
 .color-opt{width:26px;height:26px;border-radius:50%;cursor:pointer;border:2px solid transparent;transition:all .15s}
 .color-opt.sel{border-color:var(--text);transform:scale(1.15)}
@@ -433,6 +434,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     <div class="weekly-split">
       <div class="weekly-todo-panel">
         <div class="sec-title" style="margin-bottom:10px">이번 주 작업</div>
+        <div class="todo-input-wrap" style="margin-bottom:8px">
+          <input class="todo-input" id="weekly-todo-input" placeholder="새 작업 후 엔터..." onkeydown="onWeeklyTodoEnter(event)">
+        </div>
         <div class="todo-list" id="weekly-todo-list"></div>
       </div>
       <div class="weekly-tl-panel">
@@ -511,7 +515,13 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
   <div class="modal">
     <h3 id="proj-modal-title">새 프로젝트</h3>
     <div class="field"><label>프로젝트 이름</label><input id="pf-name" placeholder="이름..."></div>
-    <div class="field"><label>아이콘</label><div class="icon-grid" id="icon-grid"></div></div>
+    <div class="field"><label>아이콘 (클릭해서 이모지 선택)</label>
+      <div style="display:flex;align-items:center;gap:10px">
+        <div id="emoji-display" style="font-size:32px;width:52px;height:52px;border:1px solid var(--border2);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;background:var(--bg)" onclick="openEmojiPicker()">📁</div>
+        <input id="emoji-input" style="position:absolute;opacity:0;width:1px;height:1px" type="text" inputmode="text">
+        <span style="font-size:12px;color:var(--text3)">클릭 후 이모지 입력<br>또는 직접 붙여넣기</span>
+      </div>
+    </div>
     <div class="field"><label>색상</label><div class="color-grid" id="color-grid"></div></div>
     <div class="field"><label>설명</label><textarea id="pf-desc" placeholder="설명 (선택)"></textarea></div>
     <div class="modal-btns">
@@ -791,10 +801,13 @@ function renderBoard(){
     return `<div class="col"><div class="col-head">${v}<span class="col-cnt">${cards.length}</span></div>`+
       cards.map(c=>{
         const p=getProj(c.projId);const prog=calcProgress(c.id);
-        return `<div class="card" onclick="openPanel(${c.id})">
+        return `<div class="card${c.status==='done'?' card-done':''}" onclick="openPanel(${c.id})">
           <div class="card-proj" style="color:${p.color}"><span style="width:5px;height:5px;border-radius:50%;background:${p.color};display:inline-block"></span> ${p.name}</div>
-          <div class="card-title"><span class="pdot ${PRIO[c.priority]?.cls}"></span>${c.name}</div>
-          <div class="card-meta"><span class="tag ${TAGS[c.tag]?.cls||'tag-etc'}">${TAGS[c.tag]?.label||c.tag}</span><span class="due">${fmtDate(c.due)}</span></div>
+          <div class="card-title" style="display:flex;align-items:flex-start;gap:7px">
+            <div class="chk ${c.status==='done'?'done':''}" onclick="quickToggle(${c.id},event)" style="margin-top:1px;flex-shrink:0">✓</div>
+            <span style="${c.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${c.name}</span>
+          </div>
+          <div class="card-meta" style="margin-top:6px"><span class="tag ${TAGS[c.tag]?.cls||'tag-etc'}">${TAGS[c.tag]?.label||c.tag}</span><span class="due">${fmtDate(c.due)}</span></div>
           ${prog?`<div style="font-size:11px;color:var(--text3);margin-top:5px">${prog.done}/${prog.total} 완료</div><div class="prog-bar-wrap"><div class="prog-bar" style="width:${prog.pct}%"></div></div>`:''}
         </div>`;}).join('')+'</div>';}).join('');
 }
@@ -893,7 +906,7 @@ function renderCal(){
     // Mix and limit to 2 visible events, rest as +N
     const MAX_EV=2;
     const allEvs=[
-      ...dt.map(t=>{const p=getProj(t.projId);return{html:`<div class="ev" style="background:${p.color}22;color:${p.color};flex-shrink:0" onclick="openPanel(${t.id})">${t.name}</div>`};}),
+      ...dt.map(t=>{const p=getProj(t.projId);const done=t.status==="done";return{html:`<div class="ev" style="background:${p.color}${done?"11":"22"};color:${p.color};flex-shrink:0;border-left:2px solid ${p.color};${done?"opacity:.4;text-decoration:line-through":""}" onclick="openPanel(${t.id})">${t.name}</div>`}}),
       ...ge.map(e=>({html:`<div class="ev" style="background:${e._calColor||'#4285f4'}33;color:${e._calColor||'#4285f4'};flex-shrink:0;border-left:2px solid ${e._calColor||'#4285f4'}">${e.summary||'(일정)'}</div>`}))
     ];
     const visEvs=allEvs.slice(0,MAX_EV).map(e=>e.html).join('');
@@ -1227,12 +1240,18 @@ function renderWeekly(){
   // Weekly todo: all tasks this week
   const weekStrs=dates.map(d=>dailyDateStr(d));
   const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||t.status==='doing');
-  document.getElementById('weekly-todo-list').innerHTML=weekTasks.length===0
+  const wList=document.getElementById('weekly-todo-list');
+  wList.innerHTML=weekTasks.length===0
     ?'<div style="font-size:12px;color:var(--text3)">이번 주 작업 없음</div>'
-    :weekTasks.map(t=>`<div class="todo-item" onclick="openPanel(${t.id})">
-      <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
-      <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px">${t.name}</span>
+    :weekTasks.map(t=>`<div class="todo-item" data-id="${t.id}" draggable="true" ondragstart="onTodoDragStart(event,${t.id})">
+      <div class="todo-swipe-bg" id="swipe-bg-${t.id}">삭제</div>
+      <div class="todo-inner">
+        <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
+        <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px" onclick="openPanel(${t.id})">${t.name}</span>
+        <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
+      </div>
     </div>`).join('');
+  wList.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
 
   // Weekly timeline grid
   const COLS=dates.length;
@@ -1278,6 +1297,17 @@ function renderWeekly(){
   setTimeout(()=>{ const w=document.getElementById('weekly-tl-wrap'); if(w) w.scrollTop=minsToTop(8*60); },50);
 }
 
+function onWeeklyTodoEnter(e){
+  if(e.key!=='Enter') return;
+  const input=document.getElementById('weekly-todo-input');
+  const name=input.value.trim(); if(!name) return;
+  const dates=getWeekDates();
+  const ds=dailyDateStr(dates[0]); // default to start of week
+  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'etc',priority:'mid',due:ds,plannedTime:0};
+  tasks.unshift(newTask);
+  input.value='';
+  saveLocal();scheduleSave();renderWeekly();
+}
 function onWeekCellClick(ds,h,half){
   const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'etc',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0};
   tasks.unshift(newTask);
@@ -1453,10 +1483,36 @@ function openNewTask(){
 }
 
 // ── Project Modal ─────────────────────────────────────────
-function buildIconGrid(){document.getElementById('icon-grid').innerHTML=ICONS.map(ic=>`<button class="icon-opt ${ic===selIcon?'sel':''}" onclick="selectIcon('${ic}')">${ic}</button>`).join('');}
+function buildIconGrid(){
+  // Update emoji display only
+  const disp=document.getElementById('emoji-display');
+  if(disp) disp.textContent=selIcon;
+}
 function buildColorGrid(){document.getElementById('color-grid').innerHTML=COLORS.map(c=>`<div class="color-opt ${c===selColor?'sel':''}" style="background:${c}" onclick="selectColor('${c}')"></div>`).join('');}
 function selectIcon(ic){selIcon=ic;buildIconGrid();}
 function selectColor(c){selColor=c;buildColorGrid();}
+function openEmojiPicker(){
+  const inp=document.getElementById('emoji-input');
+  inp.value='';
+  inp.style.position='fixed';inp.style.opacity='0';inp.style.width='1px';inp.style.height='1px';
+  inp.focus();
+  // Try native emoji picker (Chrome 93+)
+  try{ inp.showPicker && inp.showPicker(); } catch(e){}
+  inp.oninput=()=>{
+    const val=inp.value.trim();
+    if(!val) return;
+    // Get first emoji character
+    const seg=[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(val)];
+    if(seg.length>0){ selIcon=seg[0].segment; buildIconGrid(); inp.value=''; inp.blur(); }
+  };
+  inp.onkeydown=(e)=>{
+    if(e.key==='Enter'||e.key===' '){
+      const val=inp.value.trim();
+      if(val){ const seg=[...new Intl.Segmenter(undefined,{granularity:'grapheme'}).segment(val)]; if(seg.length>0) selIcon=seg[0].segment; }
+      buildIconGrid(); inp.value=''; inp.blur();
+    }
+  };
+}
 function openProjModal(id){
   editingProjId=id;
   if(id===null){document.getElementById('proj-modal-title').textContent='새 프로젝트';document.getElementById('pf-name').value='';document.getElementById('pf-desc').value='';selIcon=ICONS[0];selColor=COLORS[0];document.getElementById('proj-btn-del').style.visibility='hidden';}
