@@ -1023,6 +1023,15 @@ function renderDailyTodo(dayTasks){
   list.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
 }
 
+function quickToggle(id, e){
+  if(e && e.stopPropagation) e.stopPropagation();
+  const t=tasks.find(t=>t.id===id);
+  if(!t) return;
+  t.status=t.status==='done'?'todo':'done';
+  saveLocal();scheduleSave();
+  renderDaily();renderWeekly();renderBoard();renderTree();renderStats();renderProjFilter();
+}
+
 function attachSwipe(el){
   let startX=0,startY=0,curX=0,swiping=false,dir=null;
   const id=parseInt(el.dataset.id);
