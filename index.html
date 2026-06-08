@@ -272,6 +272,24 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-block-time{font-size:9px;opacity:.75}
 .weekly-block-resize{position:absolute;bottom:-3px;left:0;right:0;height:16px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.25));border-radius:0 0 5px 5px;z-index:10}
 
+.rt-proj{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);margin-bottom:8px;overflow:hidden}
+.rt-proj-head{display:flex;align-items:center;gap:9px;padding:12px 14px;cursor:pointer;transition:background .15s;user-select:none}
+.rt-proj-head:hover{background:var(--bg)}
+.rt-arrow{font-size:10px;color:var(--text3);width:12px;flex-shrink:0;transition:transform .2s}
+.rt-proj-icon{width:26px;height:26px;border-radius:7px;display:flex;align-items:center;justify-content:center;font-size:14px;flex-shrink:0}
+.rt-proj-name{flex:1;font-size:14px;font-weight:600;color:var(--text)}
+.rt-proj-time{font-size:14px;font-weight:700;flex-shrink:0}
+.rt-proj-body{border-top:1px solid var(--border);padding:4px 0}
+.rt-task-wrap{}
+.rt-task{display:flex;align-items:center;gap:8px;padding:7px 14px;cursor:pointer;transition:background .15s}
+.rt-task:hover{background:var(--bg)}
+.rt-sub-arrow{font-size:9px;color:var(--text3);width:12px;flex-shrink:0}
+.rt-task-chk{width:16px;height:16px;border-radius:4px;border:1.5px solid #ccc;display:flex;align-items:center;justify-content:center;font-size:9px;flex-shrink:0}
+.rt-task-chk.done{background:var(--green);border-color:var(--green);color:#fff}
+.rt-task-name{flex:1;font-size:13px;color:var(--text)}
+.rt-pending{color:var(--text3)}
+.rt-task-time{font-size:12px;font-weight:600;color:var(--text2);flex-shrink:0}
+
 /* Report */
 .report-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
 @media(max-width:680px){.report-grid{grid-template-columns:1fr 1fr}}
@@ -609,8 +627,13 @@ let editingProjId=null;
 let panelTaskId=null; // currently open task in side panel
 let collapsedIds=new Set(); // collapsed tree nodes
 let accessToken=sessionStorage.getItem('jido_token')||null;
+let tokenExpiry=parseInt(sessionStorage.getItem('jido_token_expiry')||'0');
 let driveFileId=null,syncTimeout=null;
 let gcalEvents=[];
+
+function isTokenValid(){
+  return accessToken && Date.now() < tokenExpiry - 60000; // 1분 여유
+}
 
 // ── Google Drive ──────────────────────────────────────────
 (function(){
@@ -656,7 +679,9 @@ let gcalEvents=[];
 let _tokenClient=null;
 async function _onSignedIn(token){
   accessToken=token;
+  tokenExpiry=Date.now() + 55*60*1000; // 55분 (토큰 유효기간 60분)
   sessionStorage.setItem('jido_token',token);
+  sessionStorage.setItem('jido_token_expiry',String(tokenExpiry));
   document.getElementById('btn-signin').style.display='none';
   document.getElementById('btn-signout').style.display='';
   setSyncStatus('syncing','동기화 중...');
@@ -704,6 +729,16 @@ async function fetchGcalEvents(){
       'https://www.googleapis.com/calendar/v3/users/me/calendarList?showHidden=true',
       {headers:{Authorization:'Bearer '+accessToken}}
     );
+    if(calListRes.status===401){
+      accessToken=null;
+      sessionStorage.removeItem('jido_token');
+      sessionStorage.removeItem('jido_token_expiry');
+      setSyncStatus('err','재로그인 필요');
+      showToast('로그인이 만료됐어요. 다시 로그인해주세요.');
+      document.getElementById('btn-signin').style.display='';
+      document.getElementById('btn-signout').style.display='none';
+      return;
+    }
     const calList=await calListRes.json();
     const calendars=(calList.items||[]);
 
@@ -729,12 +764,22 @@ async function fetchGcalEvents(){
 
     showToast('Google 캘린더 불러옴 ('+gcalEvents.length+'개 / '+calendars.length+'개 캘린더)');
     renderAll();
-  }catch(e){console.warn('GCal fetch failed',e);}
+  }catch(e){
+    console.warn('GCal fetch failed',e);
+    if(e?.status===401||String(e).includes('401')){
+      accessToken=null;
+      sessionStorage.removeItem('jido_token');
+      setSyncStatus('err','재로그인 필요');
+      showToast('로그인이 만료됐어요. 다시 로그인해주세요.');
+    }
+  }
 }
 function setSyncStatus(t,txt){document.getElementById('sync-dot').className='dot'+(t?' '+t:'');document.getElementById('sync-text').textContent=txt;}
 async function loadFromDrive(){
   try{
-    const r=await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='${FILE_NAME}'&fields=files(id)`,{headers:{Authorization:'Bearer '+accessToken}});
+    const driveCheck=await fetch(`https://www.googleapis.com/drive/v3/files?spaces=appDataFolder&q=name='${FILE_NAME}'&fields=files(id)`,{headers:{Authorization:'Bearer '+accessToken}});
+    if(driveCheck.status===401){ setSyncStatus('err','재로그인 필요'); showToast('로그인이 만료됐어요.'); return; }
+    const r=driveCheck;
     const d=await r.json();
     if(d.files&&d.files.length>0){
       driveFileId=d.files[0].id;
@@ -1021,6 +1066,37 @@ function renderDailyTodo(dayTasks){
   }).join('');
   // Attach touch swipe handlers
   list.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
+
+  // ── Time summary (완료 작업만) ──
+  const doneTasks=dayTasks.filter(t=>t.status==='done'&&t.plannedTime);
+  const total=doneTasks.reduce((a,t)=>a+(t.plannedTime||0),0);
+  const pm={};
+  doneTasks.forEach(t=>{ pm[t.projId]=(pm[t.projId]||0)+(t.plannedTime||0); });
+
+  let summaryEl=document.getElementById('daily-time-summary');
+  if(!summaryEl){
+    summaryEl=document.createElement('div');
+    summaryEl.id='daily-time-summary';
+    summaryEl.style.cssText='margin-top:14px;border-top:1px solid var(--border);padding-top:12px';
+    list.parentNode.appendChild(summaryEl);
+  }
+
+  const maxM=Math.max(...Object.values(pm),1);
+  summaryEl.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">완료 시간</div>
+      <div style="font-size:18px;font-weight:700;color:var(--text)">${fmtMins(total)||'0m'}</div>
+    </div>
+    ${Object.entries(pm).map(([pid,m])=>{
+      const p=getProj(parseInt(pid));
+      return`<div class="proj-bar-row">
+        <div class="proj-bar-name">${p.icon} ${p.name}</div>
+        <div class="proj-bar-wrap"><div class="proj-bar-fill" style="width:${(m/maxM*100).toFixed(0)}%;background:${p.color}"></div></div>
+        <div class="proj-bar-n">${fmtMins(m)}</div>
+      </div>`;
+    }).join('')}
+    ${!total?'<div style="font-size:12px;color:var(--text3)">완료된 작업의 시간이 여기에 합산돼요</div>':''}
+  `;
 }
 
 function quickToggle(id, e){
@@ -1167,30 +1243,74 @@ function renderTaskBlock(t, container){
   const startMins=(t.startHour||0)*60+(t.startMin||0);
   const dur=t.plannedTime||60;
   const top=minsToTop(startMins);
-  const height=Math.max(26, (dur/30)*SLOT_H);
+  const height=Math.max(30, (dur/30)*SLOT_H);
   const p=getProj(t.projId);
 
   const el=document.createElement('div');
   el.className='tl-block';
   el.id='tl-block-'+t.id;
-  el.style.cssText=`top:${top}px;height:${height}px;background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};left:58px;right:6px;position:absolute`;
-  el.draggable=true;
-  el.innerHTML=`<div class="tl-block-name">${t.name}</div><div class="tl-block-time">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div><div class="tl-block-resize" data-id="${t.id}"></div>`;
-  
-  // Drag to move
-  el.setAttribute('draggable','true');
-  el.addEventListener('dragstart', e=>{ e.dataTransfer.setData('blockId',String(t.id)); e.dataTransfer.setData('type','move'); selectedBlockId=t.id; e.stopPropagation(); });
-  // Click to select
+  el.style.cssText=`top:${top}px;height:${height}px;background:${p.color}22;border:1.5px solid ${p.color}66;color:${p.color};left:58px;right:6px;position:absolute;cursor:grab`;
+
+  el.innerHTML=`
+    <div class="tl-block-top-handle" data-id="${t.id}" style="position:absolute;top:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;background:linear-gradient(to top,transparent,${p.color}33);border-radius:6px 6px 0 0"></div>
+    <div class="tl-block-body" style="padding:3px 7px;pointer-events:none;user-select:none">
+      <div class="tl-block-name">${t.name}</div>
+      <div class="tl-block-time">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
+    </div>
+    <div class="tl-block-resize" data-id="${t.id}" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,${p.color}33);border-radius:0 0 6px 6px;z-index:11"></div>
+  `;
+
+  // ── Mouse drag to MOVE (중간 영역만) ──
+  el.addEventListener('mousedown', e=>{
+    // 핸들 영역이면 무시 (리사이즈 핸들에서 처리)
+    if(e.target.classList.contains('tl-block-resize')||e.target.classList.contains('tl-block-top-handle')) return;
+    e.preventDefault();
+    selectBlock(t.id);
+    const startY=e.clientY;
+    const origTop=parseInt(el.style.top);
+    let moved=false;
+    function onMove(mv){
+      moved=true;
+      const dy=mv.clientY-startY;
+      const newTop=Math.max(0, origTop+dy);
+      el.style.top=newTop+'px';
+      el.style.opacity='0.7';
+      el.style.cursor='grabbing';
+    }
+    function onUp(mv){
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+      el.style.opacity='1';
+      el.style.cursor='grab';
+      if(!moved){ return; }
+      // Snap to 30min grid
+      const newTop=parseInt(el.style.top);
+      const newMins=Math.round(newTop/SLOT_H)*30;
+      t.startHour=Math.floor(newMins/60);
+      t.startMin=newMins%60;
+      saveLocal();scheduleSave();renderDaily();
+    }
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
+  });
+
+  // ── Click to select / dblclick to open ──
   el.addEventListener('click', e=>{
     e.stopPropagation();
-    if(selectedBlockId===t.id){ openPanel(t.id); }
-    else { selectBlock(t.id); }
+    selectBlock(t.id);
   });
-  // Right-click context menu
+  el.addEventListener('dblclick', e=>{ e.stopPropagation(); openPanel(t.id); });
+
+  // ── Right-click ──
   el.addEventListener('contextmenu', e=>{ e.preventDefault(); e.stopPropagation(); showCtxMenu(e,t.id,'block'); });
-  // Resize handle
-  const resizeHandle=el.querySelector('.tl-block-resize');
-  resizeHandle.addEventListener('mousedown', e=>{ e.stopPropagation(); e.preventDefault(); startResize(e, t.id, el); });
+
+  // ── Bottom resize handle ──
+  const resizeBottom=el.querySelector('.tl-block-resize');
+  resizeBottom.addEventListener('mousedown', e=>{ e.stopPropagation(); e.preventDefault(); startResize(e, t.id, el, 'bottom'); });
+
+  // ── Top resize handle (시작 시간 조절) ──
+  const resizeTop=el.querySelector('.tl-block-top-handle');
+  resizeTop.addEventListener('mousedown', e=>{ e.stopPropagation(); e.preventDefault(); startResize(e, t.id, el, 'top'); });
 
   container.appendChild(el);
 }
@@ -1346,16 +1466,30 @@ function onSlotClick(h, half){
 }
 
 // ── Resize ────────────────────────────────────────────────
-function startResize(e, taskId, el){
+function startResize(e, taskId, el, direction='bottom'){
   const startY=e.clientY;
   const t=tasks.find(t=>t.id===taskId); if(!t) return;
   const startDur=t.plannedTime||60;
+  const startMins=(t.startHour||0)*60+(t.startMin||0);
+
   function onMove(ev){
     const dy=ev.clientY-startY;
-    const newDur=Math.max(30, Math.round((startDur+dy/SLOT_H*30)/30)*30);
-    t.plannedTime=newDur;
-    el.style.height=Math.max(26,(newDur/30)*SLOT_H)+'px';
-    el.querySelector('.tl-block-time').textContent=fmtHM(t.startHour,t.startMin||0)+' · '+fmtMins(newDur);
+    if(direction==='bottom'){
+      const newDur=Math.max(30, Math.round((startDur+dy/SLOT_H*30)/30)*30);
+      t.plannedTime=newDur;
+      el.style.height=Math.max(30,(newDur/30)*SLOT_H)+'px';
+    } else {
+      const deltaMins=Math.round(dy/SLOT_H)*30;
+      const newMins=Math.max(0, Math.min(startMins+deltaMins, startMins+startDur-30));
+      const newDur=Math.max(30, startDur-(newMins-startMins));
+      t.startHour=Math.floor(newMins/60);
+      t.startMin=newMins%60;
+      t.plannedTime=newDur;
+      el.style.top=minsToTop(newMins)+'px';
+      el.style.height=Math.max(30,(newDur/30)*SLOT_H)+'px';
+    }
+    const timeEl=el.querySelector('.tl-block-time');
+    if(timeEl) timeEl.textContent=fmtHM(t.startHour,t.startMin||0)+' · '+fmtMins(t.plannedTime);
   }
   function onUp(){
     document.removeEventListener('mousemove',onMove);
@@ -1656,28 +1790,96 @@ function handleWeeklyCellClick(e, cell){
 
 // ── Report ────────────────────────────────────────────────
 function renderReport(){
-  const pd=projects.map(p=>{const pt=tasks.filter(t=>t.projId===p.id);return{...p,total:pt.reduce((a,t)=>a+(t.plannedTime||0),0),taskCount:pt.length,doneCount:pt.filter(t=>t.status==='done').length};});
+  // 완료된 작업(done)의 plannedTime만 집계
+  function doneTime(taskList){
+    return taskList.filter(t=>t.status==='done').reduce((a,t)=>a+(t.plannedTime||0),0);
+  }
+
+  // ── 상단 요약 카드 ──
+  const pd=projects.map(p=>{
+    const pt=tasks.filter(t=>t.projId===p.id);
+    const total=doneTime(pt); // 완료 작업 시간만
+    return{...p,total,taskCount:pt.length,doneCount:pt.filter(t=>t.status==='done').length};
+  });
   const maxT=Math.max(...pd.map(p=>p.total),1);
   document.getElementById('report-grid').innerHTML=pd.map(p=>`
     <div class="rcard">
       <div class="rcard-top"><div class="rcard-icon" style="background:${p.color}22">${p.icon}</div><div class="rcard-name">${p.name}</div></div>
       <div class="rcard-h" style="color:${p.color}">${fmtMins(p.total)||'0m'}</div>
-      <div class="rcard-sub">${p.taskCount}개 작업 · 완료 ${p.doneCount}개</div>
+      <div class="rcard-sub">${p.taskCount}개 작업 · 완료 ${p.doneCount}개 (완료 시간만 집계)</div>
       <div class="rcard-bar"><div class="rcard-fill" style="width:${(p.total/maxT*100).toFixed(0)}%;background:${p.color}"></div></div>
     </div>`).join('');
-  const logged=tasks.filter(t=>t.plannedTime>0).sort((a,b)=>b.plannedTime-a.plannedTime);
-  document.getElementById('report-log').innerHTML=logged.length===0?
-    '<div style="font-size:13px;color:var(--text3);padding:10px 0">데일리 탭에서 시간을 입력하면 여기에 기록돼요!</div>':
-    logged.map(t=>{const p=getProj(t.projId);return`
-    <div class="log-row">
-      <div class="log-date">${fmtDate(t.due)}</div>
-      <div class="log-proj"><span style="width:7px;height:7px;border-radius:50%;background:${p.color};display:inline-block"></span>${p.name}</div>
-      <div class="log-task">${t.name}</div>
-      <div class="log-h">${fmtMins(t.plannedTime)}</div>
-    </div>`;}).join('');
+
+  // ── 트리 형식 로그 ──
+  const logEl=document.getElementById('report-log');
+
+  function buildTreeHtml(parentId, depth){
+    const children=tasks.filter(t=>t.parentId===parentId||(!parentId&&!t.parentId&&false));
+    // 최상위는 프로젝트별로 묶음
+    return '';
+  }
+
+  // 프로젝트별 트리
+  let treeHtml='';
+  projects.forEach(p=>{
+    const rootTasks=tasks.filter(t=>t.projId===p.id&&!t.parentId);
+    if(!rootTasks.length) return;
+    const projTotal=doneTime(tasks.filter(t=>t.projId===p.id));
+    treeHtml+=`<div class="rt-proj" id="rt-proj-${p.id}">
+      <div class="rt-proj-head" onclick="toggleReportProj(${p.id})">
+        <span class="rt-arrow" id="rt-arr-${p.id}">▶</span>
+        <span class="rt-proj-icon" style="background:${p.color}22">${p.icon}</span>
+        <span class="rt-proj-name">${p.name}</span>
+        <span class="rt-proj-time" style="color:${p.color}">${fmtMins(projTotal)||'0m'}</span>
+      </div>
+      <div class="rt-proj-body" id="rt-body-${p.id}" style="display:none">
+        ${buildTaskTree(rootTasks, 1, p.color)}
+      </div>
+    </div>`;
+  });
+
+  logEl.innerHTML=treeHtml||'<div style="font-size:13px;color:var(--text3);padding:10px 0">완료된 작업이 없어요</div>';
 }
 
-// ── Projects ──────────────────────────────────────────────
+function buildTaskTree(taskList, depth, color){
+  if(!taskList.length) return '';
+  return taskList.map(t=>{
+    const children=tasks.filter(c=>c.parentId===t.id);
+    const isDone=t.status==='done';
+    const time=isDone&&t.plannedTime?fmtMins(t.plannedTime):'';
+    const childrenHtml=children.length?buildTaskTree(children, depth+1, color):'';
+    const hasChildren=children.length>0;
+    const indent=depth*16;
+    return`<div class="rt-task-wrap">
+      <div class="rt-task" style="padding-left:${indent}px" onclick="${hasChildren?`toggleReportTask('rt-sub-${t.id}')`:''}" >
+        ${hasChildren?`<span class="rt-sub-arrow" id="rt-sub-arr-${t.id}">▶</span>`:'<span style="width:14px;display:inline-block"></span>'}
+        <span class="rt-task-chk ${isDone?'done':''}">${isDone?'✓':''}</span>
+        <span class="rt-task-name ${isDone?'':'rt-pending'}">${t.name}</span>
+        ${time?`<span class="rt-task-time">${time}</span>`:''}
+      </div>
+      ${hasChildren?`<div id="rt-sub-${t.id}" style="display:none">${childrenHtml}</div>`:''}
+    </div>`;
+  }).join('');
+}
+
+function toggleReportProj(id){
+  const body=document.getElementById('rt-body-'+id);
+  const arr=document.getElementById('rt-arr-'+id);
+  const open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  arr.textContent=open?'▼':'▶';
+}
+function toggleReportTask(id){
+  const body=document.getElementById(id);
+  const arrId=id.replace('rt-sub-','rt-sub-arr-');
+  const arr=document.getElementById(arrId);
+  if(!body) return;
+  const open=body.style.display==='none';
+  body.style.display=open?'block':'none';
+  if(arr) arr.textContent=open?'▼':'▶';
+}
+
+
 function renderProjList(){
   document.getElementById('proj-list').innerHTML=projects.map(p=>{
     const pt=tasks.filter(t=>t.projId===p.id&&!t.parentId);
@@ -1882,7 +2084,16 @@ dailyDate=new Date();
 document.getElementById('proj-filter').style.display='flex';
 // Auto-restore session from sessionStorage
 (async()=>{
-  if(accessToken){
+  if(accessToken && !isTokenValid()){
+    // 토큰 만료 — sessionStorage 초기화 후 재발급 시도
+    accessToken=null;
+    sessionStorage.removeItem('jido_token');
+    sessionStorage.removeItem('jido_token_expiry');
+    setSyncStatus('err','재로그인 필요');
+    showToast('로그인이 만료됐어요. 다시 로그인해주세요.');
+    return;
+  }
+  if(accessToken && isTokenValid()){
     document.getElementById('btn-signin').style.display='none';
     document.getElementById('btn-signout').style.display='';
     setSyncStatus('syncing','동기화 중...');
