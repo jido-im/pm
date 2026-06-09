@@ -195,6 +195,12 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .todo-input{width:100%;font-size:13px;padding:8px 10px;border:1px solid var(--border2);border-radius:7px;background:var(--bg);color:var(--text);font-family:inherit;outline:none}
 .todo-input:focus{border-color:var(--blue)}
 .todo-list{display:flex;flex-direction:column;gap:3px;max-height:calc(100vh - 280px);overflow-y:auto}
+.remaining-section{margin-top:12px}
+.remaining-header{font-size:11px;font-weight:700;color:var(--amber);text-transform:uppercase;letter-spacing:.06em;display:flex;align-items:center;gap:6px;margin-bottom:6px;padding:0 4px}
+.remaining-header::before{content:'';display:inline-block;width:6px;height:6px;border-radius:50%;background:var(--amber);flex-shrink:0}
+.todo-item.remaining{opacity:.75;border-left:2px solid var(--amber)}
+.todo-item.remaining .todo-inner{background:#fffbf0}
+.remaining-date{font-size:10px;color:var(--amber);flex-shrink:0;font-weight:600}
 .todo-item{display:block;border-radius:7px;border:1px solid transparent;cursor:grab;transition:border-color .15s;user-select:none}
 .todo-item:hover{border-color:var(--border)}
 .todo-item.dragging{opacity:.5;border-color:var(--blue)}
@@ -1038,65 +1044,27 @@ function renderDaily(){
   document.getElementById('daily-date-label').textContent=
     d.getFullYear()+'년 '+(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+days[d.getDay()]+')'+(isToday?' — 오늘':'');
 
-  // Todo list: tasks due today or in-progress
-  const dayTasks=tasks.filter(t=>t.due===ds||(t.status==='doing'&&!t.due));
-  renderDailyTodo(dayTasks);
+  // 오늘(해당일) 작업
+  const dayTasks=tasks.filter(t=>t.due===ds);
+
+  // 미완료 이월 작업: 해당일 이전 날짜이고, 완료 안 됐고, due가 있는 것
+  // + 위클리에서 해당 주에 속하지만 특정 날 미배정(due가 이번 주 범위인데 startHour 없는 것)
+  const weekDates=getWeekDates();
+  const weekStrs=weekDates.map(d=>dailyDateStr(d));
+  const weekStart=weekStrs[0], weekEnd=weekStrs[6];
+
+  const remaining=tasks.filter(t=>{
+    if(t.status==='done') return false;
+    if(dayTasks.includes(t)) return false;
+    // 이전 날짜 미완료
+    if(t.due && t.due < ds) return true;
+    // 이번 주 작업인데 특정 날 미배정 (due가 이번 주 범위이고 오늘 이전)
+    if(t.due && t.due>=weekStart && t.due<=ds && t.due!==ds) return true;
+    return false;
+  });
+
+  renderDailyTodo(dayTasks, remaining);
   renderDailyTimeline(ds, dayTasks);
-}
-
-function renderDailyTodo(dayTasks){
-  const list=document.getElementById('daily-todo-list');
-  if(dayTasks.length===0){list.innerHTML='<div style="font-size:12px;color:var(--text3);padding:12px 0;text-align:center">일정 없음</div>';return;}
-  list.innerHTML=dayTasks.map(t=>{
-    const scheduled=t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='';
-    const timeStr=scheduled?fmtHM(t.startHour,t.startMin||0):'';
-    const projBtns=projects.map(p=>`<div class="todo-swipe-proj" style="background:${p.color}" onclick="assignProj(event,${t.id},${p.id})">${p.icon}</div>`).join('');
-    return`<div class="todo-item${scheduled?' scheduled':''}" data-id="${t.id}" draggable="true"
-      ondragstart="onTodoDragStart(event,${t.id})">
-      <div class="todo-swipe-right" id="swipe-right-${t.id}">${projBtns}</div>
-      <div class="todo-swipe-left" id="swipe-left-${t.id}">🗑 삭제</div>
-      <div class="todo-inner" id="todo-inner-${t.id}">
-        <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
-        <span class="todo-chk-dot" style="width:7px;height:7px;border-radius:50%;background:${getProj(t.projId).color};flex-shrink:0;display:inline-block"></span>
-        <span class="todo-name ${t.status==='done'?'done':''}" onclick="openPanel(${t.id})" style="flex:1">${t.name}</span>
-        ${timeStr?`<span class="todo-time">${timeStr}</span>`:''}
-        <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
-      </div>
-    </div>`;
-  }).join('');
-  // Attach touch swipe handlers
-  list.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
-
-  // ── Time summary (완료 작업만) ──
-  const doneTasks=dayTasks.filter(t=>t.status==='done'&&t.plannedTime);
-  const total=doneTasks.reduce((a,t)=>a+(t.plannedTime||0),0);
-  const pm={};
-  doneTasks.forEach(t=>{ pm[t.projId]=(pm[t.projId]||0)+(t.plannedTime||0); });
-
-  let summaryEl=document.getElementById('daily-time-summary');
-  if(!summaryEl){
-    summaryEl=document.createElement('div');
-    summaryEl.id='daily-time-summary';
-    summaryEl.style.cssText='margin-top:14px;border-top:1px solid var(--border);padding-top:12px';
-    list.parentNode.appendChild(summaryEl);
-  }
-
-  const maxM=Math.max(...Object.values(pm),1);
-  summaryEl.innerHTML=`
-    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:10px">
-      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">완료 시간</div>
-      <div style="font-size:18px;font-weight:700;color:var(--text)">${fmtMins(total)||'0m'}</div>
-    </div>
-    ${Object.entries(pm).map(([pid,m])=>{
-      const p=getProj(parseInt(pid));
-      return`<div class="proj-bar-row">
-        <div class="proj-bar-name">${p.icon} ${p.name}</div>
-        <div class="proj-bar-wrap"><div class="proj-bar-fill" style="width:${(m/maxM*100).toFixed(0)}%;background:${p.color}"></div></div>
-        <div class="proj-bar-n">${fmtMins(m)}</div>
-      </div>`;
-    }).join('')}
-    ${!total?'<div style="font-size:12px;color:var(--text3)">완료된 작업의 시간이 여기에 합산돼요</div>':''}
-  `;
 }
 
 function quickToggle(id, e){
@@ -1112,13 +1080,13 @@ function attachSwipe(el){
   let startX=0,startY=0,curX=0,swiping=false,dir=null;
   const id=parseInt(el.dataset.id);
   const inner=el.querySelector('.todo-inner');
-  const bgLeft=el.querySelector('.todo-swipe-left');   // delete (right→left)
-  const bgRight=el.querySelector('.todo-swipe-right'); // project (left→right)
-  const MAX=Math.min(projects.length*44+16, 200);      // right panel width
-  const DEL_W=72;                                       // left delete panel width
+  const bgLeft=el.querySelector('.todo-swipe-left');
+  const bgRight=el.querySelector('.todo-swipe-right');
+  const MAX=Math.min(projects.length*44+16, 200);
+  const DEL_W=72;
 
   function reset(){
-    inner.style.transform='';
+    if(inner) inner.style.transform='';
     if(bgLeft) bgLeft.style.width='0';
     if(bgRight) bgRight.style.width='0';
     dir=null;
@@ -1127,8 +1095,7 @@ function attachSwipe(el){
   el.addEventListener('touchstart',e=>{
     startX=e.touches[0].clientX;
     startY=e.touches[0].clientY;
-    curX=startX;
-    swiping=true;dir=null;
+    curX=startX;swiping=true;dir=null;
   },{passive:true});
 
   el.addEventListener('touchmove',e=>{
@@ -1136,21 +1103,18 @@ function attachSwipe(el){
     curX=e.touches[0].clientX;
     const dx=curX-startX;
     const dy=e.touches[0].clientY-startY;
-    // Ignore vertical scrolling
-    if(dir===null){ if(Math.abs(dy)>Math.abs(dx)+5){swiping=false;return;} if(Math.abs(dx)>6) dir=dx>0?'right':'left'; }
+    if(dir===null){if(Math.abs(dy)>Math.abs(dx)+5){swiping=false;return;}if(Math.abs(dx)>6)dir=dx>0?'right':'left';}
     if(!dir)return;
     if(dir==='left'){
-      // swipe left → show delete
-      const w=Math.min(DEL_W, Math.max(0,-dx));
-      inner.style.transform=`translateX(${-w}px)`;
-      if(bgLeft) bgLeft.style.width=w+'px';
-      if(bgRight) bgRight.style.width='0';
+      const w=Math.min(DEL_W,Math.max(0,-dx));
+      if(inner)inner.style.transform=`translateX(${-w}px)`;
+      if(bgLeft)bgLeft.style.width=w+'px';
+      if(bgRight)bgRight.style.width='0';
     } else {
-      // swipe right → show projects
-      const w=Math.min(MAX, Math.max(0,dx));
-      inner.style.transform=`translateX(${w}px)`;
-      if(bgRight) bgRight.style.width=w+'px';
-      if(bgLeft) bgLeft.style.width='0';
+      const w=Math.min(MAX,Math.max(0,dx));
+      if(inner)inner.style.transform=`translateX(${w}px)`;
+      if(bgRight)bgRight.style.width=w+'px';
+      if(bgLeft)bgLeft.style.width='0';
     }
   },{passive:true});
 
@@ -1158,23 +1122,17 @@ function attachSwipe(el){
     if(!swiping){reset();return;}
     const dx=curX-startX;
     if(dir==='left'&&dx<-50){
-      // Confirm delete
       el.style.transition='opacity .15s,transform .15s';
       el.style.opacity='0';el.style.transform='translateX(-40px)';
       setTimeout(()=>quickDeleteTask(id),180);
     } else if(dir==='right'&&dx>30){
-      // Keep project panel open for selection
-      inner.style.transform=`translateX(${MAX}px)`;
-      if(bgRight) bgRight.style.width=MAX+'px';
-      // Auto-close after 3s if no selection
-      setTimeout(reset, 3000);
-    } else {
-      reset();
-    }
+      if(inner)inner.style.transform=`translateX(${MAX}px)`;
+      if(bgRight)bgRight.style.width=MAX+'px';
+      setTimeout(reset,3000);
+    } else {reset();}
     swiping=false;
   });
 
-  // Also close on scroll
   el.closest('.todo-list')?.addEventListener('scroll',reset,{passive:true});
 }
 
@@ -1183,13 +1141,80 @@ function assignProj(e, taskId, projId){
   const t=tasks.find(t=>t.id===taskId); if(!t) return;
   t.projId=projId;
   saveLocal();scheduleSave();
-  // Reset swipe and re-render
   const el=document.querySelector(`[data-id="${taskId}"]`);
   if(el){el.style.transition='opacity .15s';el.style.opacity='0';setTimeout(()=>renderDaily(),150);}
   else renderDaily();
   renderWeekly();
   showToast(`프로젝트: ${getProj(projId).name}`);
 }
+
+function renderDailyTodo(dayTasks, remainingTasks=[]){
+  const list=document.getElementById('daily-todo-list');
+
+  function makeTodoItemHtml(t, extra=''){
+    const scheduled=t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='';
+    const timeStr=scheduled?fmtHM(t.startHour,t.startMin||0):'';
+    const projBtns=projects.map(p=>`<div class="todo-swipe-proj" style="background:${p.color}" onclick="assignProj(event,${t.id},${p.id})">${p.icon}</div>`).join('');
+    return `<div class="todo-item${scheduled?' scheduled':''}${extra?' '+extra:''}" data-id="${t.id}" draggable="true"
+      ondragstart="onTodoDragStart(event,${t.id})">
+      <div class="todo-swipe-right" id="swipe-right-${t.id}">${projBtns}</div>
+      <div class="todo-swipe-left" id="swipe-left-${t.id}">🗑 삭제</div>
+      <div class="todo-inner" id="todo-inner-${t.id}">
+        <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
+        <span class="todo-chk-dot" style="width:7px;height:7px;border-radius:50%;background:${getProj(t.projId).color};flex-shrink:0;display:inline-block"></span>
+        <span class="todo-name ${t.status==='done'?'done':''}" onclick="openPanel(${t.id})" style="flex:1">${t.name}</span>
+        ${timeStr?`<span class="todo-time">${timeStr}</span>`:''}
+        <span class="remaining-date">${extra==='remaining'&&t.due?fmtDate(t.due):''}</span>
+        <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
+      </div>
+    </div>`;
+  }
+
+  if(dayTasks.length===0&&remainingTasks.length===0){
+    list.innerHTML='<div style="font-size:12px;color:var(--text3);padding:12px 0;text-align:center">일정 없음</div>';
+  } else {
+    const dayHtml=dayTasks.map(t=>makeTodoItemHtml(t)).join('');
+    const remainHtml=remainingTasks.length>0?`
+      <div class="remaining-section">
+        <div class="remaining-header">이월된 미완료 (${remainingTasks.length})</div>
+        ${remainingTasks.map(t=>makeTodoItemHtml(t,'remaining')).join('')}
+      </div>`:'';
+    list.innerHTML=(dayTasks.length===0?'<div style="font-size:12px;color:var(--text3);padding:8px 4px">오늘 일정 없음</div>':dayHtml)+remainHtml;
+  }
+  list.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
+
+  // ── Time summary (완료 작업만) ──
+  const allShown=[...dayTasks,...remainingTasks];
+  const doneTasks=allShown.filter(t=>t.status==='done'&&t.plannedTime);
+  const total=doneTasks.reduce((a,t)=>a+(t.plannedTime||0),0);
+  const pm={};
+  doneTasks.forEach(t=>{ pm[t.projId]=(pm[t.projId]||0)+(t.plannedTime||0); });
+
+  let summaryEl=document.getElementById('daily-time-summary');
+  if(!summaryEl){
+    summaryEl=document.createElement('div');
+    summaryEl.id='daily-time-summary';
+    summaryEl.style.cssText='margin-top:14px;border-top:1px solid var(--border);padding-top:12px';
+    list.parentNode.appendChild(summaryEl);
+  }
+  const maxM=Math.max(...Object.values(pm),1);
+  summaryEl.innerHTML=`
+    <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:8px">
+      <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em">완료 시간</div>
+      <div style="font-size:18px;font-weight:700;color:var(--text)">${fmtMins(total)||'0m'}</div>
+    </div>
+    ${Object.entries(pm).map(([pid,m])=>{
+      const p=getProj(parseInt(pid));
+      return`<div class="proj-bar-row">
+        <div class="proj-bar-name">${p.icon} ${p.name}</div>
+        <div class="proj-bar-wrap"><div class="proj-bar-fill" style="width:${(m/maxM*100).toFixed(0)}%;background:${p.color}"></div></div>
+        <div class="proj-bar-n">${fmtMins(m)}</div>
+      </div>`;
+    }).join('')}
+    ${!total?'<div style="font-size:12px;color:var(--text3)">완료된 작업 시간이 여기에 합산돼요</div>':''}
+  `;
+}
+
 
 function renderDailyTimeline(ds, dayTasks){
   const wrap=document.getElementById('tl-inner');
