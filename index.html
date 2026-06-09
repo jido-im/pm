@@ -789,9 +789,28 @@ async function loadFromDrive(){
     const d=await r.json();
     if(d.files&&d.files.length>0){
       driveFileId=d.files[0].id;
-      const data=await(await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,{headers:{Authorization:'Bearer '+accessToken}})).json();
-      projects=data.projects||projects;tasks=data.tasks||tasks;nextTaskId=data.nextTaskId||nextTaskId;nextProjId=data.nextProjId||nextProjId;
-      setSyncStatus('ok','동기화 완료');showToast('불러오기 완료');
+      const driveData=await(await fetch(`https://www.googleapis.com/drive/v3/files/${driveFileId}?alt=media`,{headers:{Authorization:'Bearer '+accessToken}})).json();
+      // localStorage와 타임스탬프 비교 — 더 최신인 것 사용
+      let localData=null;
+      try{ const raw=localStorage.getItem('jido_v3'); if(raw) localData=JSON.parse(raw); }catch(e){}
+      const driveTs=driveData._ts||0;
+      const localTs=localData?._ts||0;
+      if(localTs > driveTs){
+        // localStorage가 더 최신 → Drive에 업로드
+        setSyncStatus('syncing','로컬 데이터 업로드 중...');
+        await saveToDrive();
+        setSyncStatus('ok','동기화 완료');
+        showToast('최신 데이터로 동기화 완료');
+      } else {
+        // Drive가 더 최신 또는 동일 → Drive 데이터 사용
+        projects=driveData.projects||projects;
+        tasks=driveData.tasks||tasks;
+        nextTaskId=driveData.nextTaskId||nextTaskId;
+        nextProjId=driveData.nextProjId||nextProjId;
+        saveLocal(); // localStorage도 최신화
+        setSyncStatus('ok','동기화 완료');
+        showToast('불러오기 완료');
+      }
     } else {await saveToDrive();setSyncStatus('ok','준비 완료');}
   }catch(e){setSyncStatus('err','오류');showToast('불러오기 실패');}
   renderAll();
@@ -800,7 +819,7 @@ async function saveToDrive(){
   if(!accessToken)return;
   setSyncStatus('syncing','저장 중...');
   try{
-    const content=JSON.stringify({projects,tasks,nextTaskId,nextProjId});
+    const content=JSON.stringify({projects,tasks,nextTaskId,nextProjId,_ts:Date.now()});
     if(driveFileId){
       await fetch(`https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media`,{method:'PATCH',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:content});
     } else {
@@ -812,8 +831,8 @@ async function saveToDrive(){
     setSyncStatus('ok','저장 완료');
   }catch(e){setSyncStatus('err','저장 실패');}
 }
-function scheduleSave(){clearTimeout(syncTimeout);syncTimeout=setTimeout(saveToDrive,1500);}
-function saveLocal(){try{localStorage.setItem('jido_v3',JSON.stringify({projects,tasks,nextTaskId,nextProjId}));}catch(e){}}
+function scheduleSave(){clearTimeout(syncTimeout);syncTimeout=setTimeout(saveToDrive,500);}
+function saveLocal(){try{localStorage.setItem('jido_v3',JSON.stringify({projects,tasks,nextTaskId,nextProjId,_ts:Date.now()}));}catch(e){}}
 function loadLocal(){try{const d=localStorage.getItem('jido_v3');if(d){const p=JSON.parse(d);projects=p.projects||projects;tasks=p.tasks||tasks;nextTaskId=p.nextTaskId||nextTaskId;nextProjId=p.nextProjId||nextProjId;}}catch(e){}}
 
 
@@ -849,7 +868,10 @@ function allDescendants(id){let res=[];const ch=childTasks(id);ch.forEach(c=>{re
 function calcProgress(id){const ch=childTasks(id);if(!ch.length)return null;const done=ch.filter(c=>c.status==='done').length;return{done,total:ch.length,pct:Math.round(done/ch.length*100)};}
 function fmtDate(s){if(!s)return'';const[,m,d]=s.split('-');return m+'/'+d;}
 function fmtMins(m){if(!m&&m!==0)return'-';if(!m)return'0m';const h=Math.floor(m/60),mm=m%60;return h>0?(mm>0?h+'h '+mm+'m':h+'h'):mm+'m';}
-function todayStr(){return new Date().toISOString().split('T')[0];}
+function todayStr(){
+  const d=new Date();
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function showToast(msg){const t=document.getElementById('toast');t.textContent=msg;t.classList.add('show');setTimeout(()=>t.classList.remove('show'),2200);}
 function getAncestors(id){const res=[];let t=tasks.find(t=>t.id===id);while(t&&t.parentId){t=tasks.find(x=>x.id===t.parentId);if(t)res.unshift(t);}return res;}
 
@@ -1023,7 +1045,9 @@ let weekOffset = 0; // week offset from current week
 const SLOT_H = 30; // px per 30-min slot
 const SLOTS_PER_HOUR = 2;
 
-function dailyDateStr(d){ return d.toISOString().split('T')[0]; }
+function dailyDateStr(d){
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
 function changeDailyDate(d){ dailyDate=new Date(dailyDate); dailyDate.setDate(dailyDate.getDate()+d); dailyDate.setHours(0,0,0,0); renderDaily(); }
 function goToday(){ dailyDate=new Date(); dailyDate.setHours(0,0,0,0); renderDaily(); }
 function changeWeek(d){ weekOffset+=d; renderWeekly(); }
@@ -1634,16 +1658,36 @@ function renderWeekly(){
     html += `</div>`;
   });
 
-  // Now line
+  // Now line — 렌더링 후 DOM에서 정확한 컬럼 위치 계산
   if(dates.some(d=>dailyDateStr(d)===todayS)){
     const now=new Date();
     const nowPx=minsToTop(now.getHours()*60+now.getMinutes());
     const todayIdx=dates.findIndex(d=>dailyDateStr(d)===todayS);
-    html += `<div style="position:absolute;top:${nowPx}px;left:${TIME_COL + todayIdx*(100/COLS)}%;width:${100/COLS}%;height:2px;background:var(--red);z-index:15;pointer-events:none"></div>`;
+    // % 대신 todayIdx/COLS 비율로 정확히 계산 (TIME_COL 제외)
+    // after render, inject into correct col
+    html += `<div id="weekly-now-placeholder" data-today-idx="${todayIdx}" data-now-px="${nowPx}" data-cols="${COLS}" style="display:none"></div>`;
   }
 
   html += `</div>`;
   wrap.innerHTML = `<div class="weekly-grid">${html}</div>`;
+
+  // Position now-line after DOM is set
+  const ph=document.getElementById('weekly-now-placeholder');
+  if(ph){
+    const todayIdx=parseInt(ph.dataset.todayIdx);
+    const nowPx=parseInt(ph.dataset.nowPx);
+    const COLS_N=parseInt(ph.dataset.cols);
+    const todayDs=dailyDateStr(dates[todayIdx]);
+    const col=document.getElementById('wcol-'+todayDs);
+    if(col){
+      const line=document.createElement('div');
+      line.style.cssText=`position:absolute;top:${nowPx}px;left:0;right:0;height:2px;background:var(--red);z-index:15;pointer-events:none`;
+      const dot=document.createElement('div');
+      dot.style.cssText=`position:absolute;top:${nowPx-3}px;left:-4px;width:8px;height:8px;border-radius:50%;background:var(--red);z-index:15;pointer-events:none`;
+      col.appendChild(line);
+      col.appendChild(dot);
+    }
+  }
 
   // Render task blocks using same renderTaskBlock logic
   dates.forEach(d=>{
@@ -2107,6 +2151,11 @@ function deleteProject(){
 loadLocal();renderAll();
 dailyDate=new Date();
 document.getElementById('proj-filter').style.display='flex';
+// 페이지 닫기/새로고침 전 즉시 저장
+window.addEventListener('beforeunload',()=>{
+  saveLocal();
+  if(accessToken&&syncTimeout){ clearTimeout(syncTimeout); saveToDrive(); }
+});
 // Auto-restore session from sessionStorage
 (async()=>{
   if(accessToken && !isTokenValid()){
