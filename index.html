@@ -649,6 +649,8 @@ let tasks=[
   {id:7,name:'SNS 콘텐츠 기획',parentId:null,projId:3,memo:'',status:'todo',tag:'etc',priority:'mid',due:'2026-05-09',plannedTime:60},
 ];
 let nextTaskId=8,nextProjId=4;
+let timeLogs=[]; // [{id, taskId, date, startHour, startMin, duration, projId}]
+let nextLogId=1;
 let selProjId=null;
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth();
 let selIcon=ICONS[0],selColor=COLORS[0];
@@ -828,8 +830,10 @@ async function loadFromDrive(){
         // Drive가 더 최신 또는 동일 → Drive 데이터 사용
         projects=driveData.projects||projects;
         tasks=driveData.tasks||tasks;
+        timeLogs=driveData.timeLogs||[];
         nextTaskId=driveData.nextTaskId||nextTaskId;
         nextProjId=driveData.nextProjId||nextProjId;
+        nextLogId=driveData.nextLogId||1;
         saveLocal(); // localStorage도 최신화
         setSyncStatus('ok','동기화 완료');
         showToast('불러오기 완료');
@@ -842,7 +846,7 @@ async function saveToDrive(){
   if(!accessToken)return;
   setSyncStatus('syncing','저장 중...');
   try{
-    const content=JSON.stringify({projects,tasks,nextTaskId,nextProjId,_ts:Date.now()});
+    const content=JSON.stringify({projects,tasks,timeLogs,nextTaskId,nextProjId,nextLogId,_ts:Date.now()});
     if(driveFileId){
       await fetch(`https://www.googleapis.com/upload/drive/v3/files/${driveFileId}?uploadType=media`,{method:'PATCH',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},body:content});
     } else {
@@ -855,8 +859,8 @@ async function saveToDrive(){
   }catch(e){setSyncStatus('err','저장 실패');}
 }
 function scheduleSave(){clearTimeout(syncTimeout);syncTimeout=setTimeout(saveToDrive,500);}
-function saveLocal(){try{localStorage.setItem('jido_v3',JSON.stringify({projects,tasks,nextTaskId,nextProjId,_ts:Date.now()}));}catch(e){}}
-function loadLocal(){try{const d=localStorage.getItem('jido_v3');if(d){const p=JSON.parse(d);projects=p.projects||projects;tasks=p.tasks||tasks;nextTaskId=p.nextTaskId||nextTaskId;nextProjId=p.nextProjId||nextProjId;}}catch(e){}}
+function saveLocal(){try{localStorage.setItem('jido_v3',JSON.stringify({projects,tasks,timeLogs,nextTaskId,nextProjId,nextLogId,_ts:Date.now()}));}catch(e){}}
+function loadLocal(){try{const d=localStorage.getItem('jido_v3');if(d){const p=JSON.parse(d);projects=p.projects||projects;tasks=p.tasks||tasks;timeLogs=p.timeLogs||[];nextTaskId=p.nextTaskId||nextTaskId;nextProjId=p.nextProjId||nextProjId;nextLogId=p.nextLogId||1;}}catch(e){}}
 
 
 // ── Google Calendar Sync (auto-create/update events) ─────────────────
@@ -1237,12 +1241,24 @@ function renderDailyTodo(dayTasks, remainingTasks=[]){
   }
   list.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
 
-  // ── Time summary (완료 작업만) ──
+  // ── Time summary — timeLogs 기반 (완료 작업만) ──
   const allShown=[...dayTasks,...remainingTasks];
-  const doneTasks=allShown.filter(t=>t.status==='done'&&t.plannedTime);
-  const total=doneTasks.reduce((a,t)=>a+(t.plannedTime||0),0);
+  const doneIds=new Set(allShown.filter(t=>t.status==='done').map(t=>t.id));
+  // 이 날짜의 log 중 완료된 작업 것만
   const pm={};
-  doneTasks.forEach(t=>{ pm[t.projId]=(pm[t.projId]||0)+(t.plannedTime||0); });
+  let total=0;
+  // timeLogs 우선
+  timeLogs.forEach(l=>{
+    if(!doneIds.has(l.taskId)) return;
+    pm[l.projId||tasks.find(t=>t.id===l.taskId)?.projId]=(pm[l.projId||tasks.find(t=>t.id===l.taskId)?.projId]||0)+(l.duration||0);
+    total+=l.duration||0;
+  });
+  // log 없는 완료 작업은 plannedTime으로
+  const loggedIds=new Set(timeLogs.map(l=>l.taskId));
+  allShown.filter(t=>t.status==='done'&&t.plannedTime&&!loggedIds.has(t.id)).forEach(t=>{
+    pm[t.projId]=(pm[t.projId]||0)+(t.plannedTime||0);
+    total+=t.plannedTime||0;
+  });
 
   let summaryEl=document.getElementById('daily-time-summary');
   if(!summaryEl){
@@ -1300,10 +1316,24 @@ function renderDailyTimeline(ds, dayTasks){
   }
   wrap.innerHTML=html;
 
-  // Compute overlapping columns for blocks
-  const scheduled=dayTasks.filter(t=>t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='');
-  const colMap=computeColumns(scheduled);
-  scheduled.forEach(t=>{ renderTaskBlock(t, wrap, colMap[t.id]); });
+  // Show blocks from timeLogs for this date (preserves history)
+  const logsForDay=timeLogs.filter(l=>l.date===ds);
+  // Also include tasks with startHour set to this date but no log yet
+  const scheduledTasks=dayTasks.filter(t=>
+    t.startHour!==undefined&&t.startHour!==null&&t.startHour!==''&&
+    !logsForDay.find(l=>l.taskId===t.id)
+  );
+  // Merge: logs + unlogged scheduled tasks
+  const allBlocks=[
+    ...logsForDay.map(l=>({
+      ...tasks.find(t=>t.id===l.taskId)||{},
+      startHour:l.startHour, startMin:l.startMin,
+      plannedTime:l.duration, _logId:l.id, _fromLog:true
+    })).filter(b=>b.id),
+    ...scheduledTasks
+  ];
+  const colMap=computeColumns(allBlocks);
+  allBlocks.forEach(t=>{ renderTaskBlock(t, wrap, colMap[t.id]); });
 
   // Render gcal blocks for this day
   gcalEvents.filter(e=>{
@@ -1411,6 +1441,10 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
       const newMins=Math.round(newTop/SLOT_H)*30;
       t.startHour=Math.floor(newMins/60);
       t.startMin=newMins%60;
+      // Update timeLogs
+      const ds2=dailyDateStr(dailyDate);
+      const lg=timeLogs.find(l=>l.taskId===t.id&&l.date===ds2);
+      if(lg){lg.startHour=t.startHour;lg.startMin=t.startMin;}
       saveLocal();scheduleSave();renderDaily();
     }
     document.addEventListener('mousemove',onMove);
@@ -1559,6 +1593,7 @@ function hideCtxMenu(){if(ctxMenu){ctxMenu.remove();ctxMenu=null;}}
 function quickDeleteTask(id){
   const toDelete=[id,...allDescendants(id).map(t=>t.id)];
   tasks=tasks.filter(t=>!toDelete.includes(t.id));
+  timeLogs=timeLogs.filter(l=>!toDelete.includes(l.taskId));
   saveLocal();scheduleSave();renderDaily();renderWeekly();renderBoard();renderTree();renderStats();
   showToast('삭제됐어요');
 }
@@ -1572,12 +1607,38 @@ function onSlotDrop(e, h, half){
   const type=e.dataTransfer.getData('type');
   const id=parseInt(e.dataTransfer.getData(type==='move'?'blockId':'taskId'));
   const t=tasks.find(t=>t.id===id); if(!t) return;
-  t.startHour=h; t.startMin=half?30:0;
-  if(!t.plannedTime) t.plannedTime=60;
-  // Make sure due date matches current daily date
-  t.due=dailyDateStr(dailyDate);
+  const ds=dailyDateStr(dailyDate);
+
+  if(type==='move'){
+    // 같은 날 이동: 기존 log 업데이트
+    const existingLog=timeLogs.find(l=>l.taskId===id&&l.date===ds);
+    if(existingLog){
+      existingLog.startHour=h; existingLog.startMin=half?30:0;
+    }
+    // task의 현재 표시용 필드도 업데이트
+    t.startHour=h; t.startMin=half?30:0;
+    t.due=ds;
+  } else {
+    // 투두→시간표 드롭: 새 날짜에 새 log 추가 (기존 기록 보존!)
+    const existingLog=timeLogs.find(l=>l.taskId===id&&l.date===ds);
+    if(existingLog){
+      // 이미 오늘 log 있으면 시간만 업데이트
+      existingLog.startHour=h; existingLog.startMin=half?30:0;
+    } else {
+      // 새 log 생성 — 기존 날짜/시간 기록은 그대로 유지
+      timeLogs.push({
+        id:nextLogId++, taskId:id, date:ds,
+        startHour:h, startMin:half?30:0,
+        duration:t.plannedTime||60, projId:t.projId
+      });
+    }
+    // task 표시용 필드 업데이트 (오늘 기준)
+    t.startHour=h; t.startMin=half?30:0;
+    t.due=ds;
+    if(!t.plannedTime) t.plannedTime=60;
+  }
   saveLocal(); scheduleSave();
-  renderDaily(); // re-renders both todo list and timeline together
+  renderDaily();
 }
 function onSlotClick(h, half){
   // Quick add task at this time
@@ -1617,6 +1678,10 @@ function startResize(e, taskId, el, direction='bottom'){
   function onUp(){
     document.removeEventListener('mousemove',onMove);
     document.removeEventListener('mouseup',onUp);
+    // Update timeLogs if this block came from a log
+    const ds=dailyDateStr(dailyDate);
+    const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
+    if(existLog){ existLog.startHour=t.startHour; existLog.startMin=t.startMin; existLog.duration=t.plannedTime; }
     saveLocal(); scheduleSave(); renderDaily(); renderWeekly();
   }
   document.addEventListener('mousemove',onMove);
@@ -1998,9 +2063,15 @@ function renderMonthly(){
 }
 
 function renderReport(){
-  // 완료된 작업(done)의 plannedTime만 집계
+  // timeLogs 기반 집계 — 완료된 작업의 모든 날짜 기록 합산
   function doneTime(taskList){
-    return taskList.filter(t=>t.status==='done').reduce((a,t)=>a+(t.plannedTime||0),0);
+    const ids=new Set(taskList.filter(t=>t.status==='done').map(t=>t.id));
+    // timeLogs에 기록된 시간 우선 사용
+    const loggedTime=timeLogs.filter(l=>ids.has(l.taskId)).reduce((a,l)=>a+(l.duration||0),0);
+    // log 없는 완료 작업은 plannedTime 사용
+    const loggedTaskIds=new Set(timeLogs.map(l=>l.taskId));
+    const unloggedTime=taskList.filter(t=>t.status==='done'&&!loggedTaskIds.has(t.id)).reduce((a,t)=>a+(t.plannedTime||0),0);
+    return loggedTime+unloggedTime;
   }
 
   // ── 상단 요약 카드 ──
@@ -2086,6 +2157,30 @@ function renderReport(){
   });
 
   logEl.innerHTML=treeHtml||'<div style="font-size:13px;color:var(--text3);padding:10px 0">완료된 작업이 없어요</div>';
+
+  // ── 시간 기록 로그 (timeLogs 기반) ──
+  const sortedLogs=[...timeLogs].sort((a,b)=>b.date.localeCompare(a.date));
+  const logListEl=document.getElementById('report-log');
+  const logSection=`<div style="margin-top:18px">
+    <div class="sec-title" style="margin-bottom:10px">시간 기록 로그</div>
+    ${sortedLogs.length===0
+      ?'<div style="font-size:13px;color:var(--text3)">스케줄에 작업을 배치하면 기록이 쌓여요!</div>'
+      :sortedLogs.map(l=>{
+        const t=tasks.find(t=>t.id===l.taskId)||{name:'(삭제된 작업)',projId:l.projId||0};
+        const p=getProj(t.projId||l.projId);
+        const isDone=t.status==='done';
+        return`<div class="log-row">
+          <div class="log-date">${fmtDate(l.date)}</div>
+          <div class="log-proj"><span style="width:7px;height:7px;border-radius:50%;background:${p.color};display:inline-block;margin-right:3px"></span>${p.name}</div>
+          <div class="log-task" style="${isDone?'text-decoration:line-through;color:var(--text3)':''}min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${t.name}</div>
+          <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
+            ${isDone?'<span style="font-size:10px;background:var(--green)22;color:var(--green);padding:1px 5px;border-radius:4px;font-weight:600">완료</span>':''}
+            <div class="log-h">${fmtHM(l.startHour,l.startMin||0)} · ${fmtMins(l.duration)}</div>
+          </div>
+        </div>`;
+      }).join('')}
+  </div>`;
+  logListEl.insertAdjacentHTML('beforeend', logSection);
 }
 
 function buildTaskTree(taskList, depth, color){
