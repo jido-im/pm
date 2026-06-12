@@ -296,6 +296,18 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .rt-pending{color:var(--text3)}
 .rt-task-time{font-size:12px;font-weight:600;color:var(--text2);flex-shrink:0}
 
+/* Monthly */
+.monthly-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:3px}
+.monthly-day-lbl{font-size:11px;font-weight:700;text-align:center;color:var(--text3);padding:6px 0;letter-spacing:.04em}
+.monthly-cell{min-height:110px;background:var(--card);border:1px solid var(--border);border-radius:8px;padding:6px;display:flex;flex-direction:column;cursor:pointer;transition:border-color .15s}
+.monthly-cell:hover{border-color:#a8c8e8}
+.monthly-cell.today{border-color:var(--blue)}
+.monthly-cell.other-month{background:var(--bg);opacity:.5}
+.monthly-day-num{font-size:12px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center;margin-bottom:3px;flex-shrink:0}
+.monthly-cell.today .monthly-day-num{background:var(--blue);color:#fff;border-radius:50%}
+.monthly-ev{font-size:10px;padding:2px 5px;border-radius:4px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;cursor:pointer}
+.monthly-more{font-size:10px;color:var(--text3);padding-left:3px}
+
 /* Report */
 .report-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:18px}
 @media(max-width:680px){.report-grid{grid-template-columns:1fr 1fr}}
@@ -433,6 +445,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
       <button class="ntab" onclick="switchTab('cal')">캘린더</button>
       <button class="ntab" onclick="switchTab('daily')">데일리</button>
       <button class="ntab" onclick="switchTab('weekly')">위클리</button>
+      <button class="ntab" onclick="switchTab('monthly')">먼슬리</button>
       <button class="ntab" onclick="switchTab('report')">리포트</button>
       <button class="ntab" onclick="switchTab('projects')">프로젝트</button>
     </div>
@@ -502,6 +515,16 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
         <div class="weekly-tl-wrap" id="weekly-tl-wrap"></div>
       </div>
     </div>
+  </div>
+
+  <div id="view-monthly" class="view">
+    <div class="daily-nav">
+      <button class="dnav-btn" onclick="changeMonthlyMonth(-1)">&#8249;</button>
+      <span class="daily-date-label" id="monthly-label"></span>
+      <button class="dnav-btn" onclick="changeMonthlyMonth(1)">&#8250;</button>
+      <button class="dnav-today" onclick="goMonthlyToday()">이번 달</button>
+    </div>
+    <div id="monthly-wrap"></div>
   </div>
 
   <div id="view-report" class="view">
@@ -877,14 +900,15 @@ function getAncestors(id){const res=[];let t=tasks.find(t=>t.id===id);while(t&&t
 
 // ── Tab ───────────────────────────────────────────────────
 function switchTab(tab){
-  document.querySelectorAll('.ntab').forEach((el,i)=>el.classList.toggle('active',['board','list','cal','daily','weekly','report','projects'][i]===tab));
+  document.querySelectorAll('.ntab').forEach((el,i)=>el.classList.toggle('active',['board','list','cal','daily','weekly','monthly','report','projects'][i]===tab));
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
   document.getElementById('view-'+tab).classList.add('active');
-  document.getElementById('proj-filter').style.display=['board','list','cal','daily','weekly'].includes(tab)?'flex':'none';
+  if(tab==='monthly') renderMonthly();
+  document.getElementById('proj-filter').style.display=['board','list','cal','daily','weekly','monthly'].includes(tab)?'flex':'none';
   renderAll();
 }
 
-function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree();renderCal();renderDaily();renderWeekly();renderReport();renderProjList();}
+function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree();renderCal();renderDaily();renderWeekly();renderMonthly();renderReport();renderProjList();}
 
 // ── Proj Filter ───────────────────────────────────────────
 function renderProjFilter(){
@@ -1014,7 +1038,13 @@ function renderCal(){
     // Google Calendar events for this day
     const ge=gcalEvents.filter(e=>{
       const eDate=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
-      return eDate===ds;
+      if(eDate!==ds) return false;
+      // PM 작업으로 만들어진 이벤트 중복 제거 (gcalEventId 또는 제목+날짜 매칭)
+      const isDuplicate=tasks.some(t=>
+        (t.gcalEventId&&t.gcalEventId===e.id) ||
+        (t.due===ds&&t.name===e.summary&&t.startHour!==undefined)
+      );
+      return !isDuplicate;
     });
     const total=dt.length+ge.length;
     // Mix and limit to 2 visible events, rest as +N
@@ -1270,15 +1300,20 @@ function renderDailyTimeline(ds, dayTasks){
   }
   wrap.innerHTML=html;
 
-  // Render task blocks
-  dayTasks.filter(t=>t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='').forEach(t=>{
-    renderTaskBlock(t, wrap);
-  });
+  // Compute overlapping columns for blocks
+  const scheduled=dayTasks.filter(t=>t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='');
+  const colMap=computeColumns(scheduled);
+  scheduled.forEach(t=>{ renderTaskBlock(t, wrap, colMap[t.id]); });
 
   // Render gcal blocks for this day
   gcalEvents.filter(e=>{
     const ed=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
-    return ed===ds&&e.start.dateTime;
+    if(ed!==ds||!e.start.dateTime) return false;
+    const isDuplicate=tasks.some(t=>
+      (t.gcalEventId&&t.gcalEventId===e.id)||
+      (t.due===ds&&t.name===e.summary&&t.startHour!==undefined)
+    );
+    return !isDuplicate;
   }).forEach(e=>{
     renderGcalBlock(e, wrap);
   });
@@ -1288,7 +1323,40 @@ function renderDailyTimeline(ds, dayTasks){
   setTimeout(()=>{ const w=document.getElementById('daily-tl-wrap'); if(w) w.scrollTop=scrollTo; },50);
 }
 
-function renderTaskBlock(t, container){
+function computeColumns(tasks){
+  // Assign column index to each task to avoid overlap
+  const sorted=[...tasks].sort((a,b)=>{
+    const aS=(a.startHour||0)*60+(a.startMin||0);
+    const bS=(b.startHour||0)*60+(b.startMin||0);
+    return aS-bS;
+  });
+  const cols={}; // taskId -> {col, total}
+  const colEnds=[]; // end time per column
+  sorted.forEach(t=>{
+    const s=(t.startHour||0)*60+(t.startMin||0);
+    const e=s+(t.plannedTime||60);
+    let col=0;
+    while(colEnds[col]!==undefined && colEnds[col]>s) col++;
+    colEnds[col]=e;
+    cols[t.id]={col, colEnds};
+  });
+  // Calculate total columns per task (how many cols overlap)
+  sorted.forEach(t=>{
+    const s=(t.startHour||0)*60+(t.startMin||0);
+    const e=s+(t.plannedTime||60);
+    let maxCol=cols[t.id].col;
+    sorted.forEach(u=>{
+      if(u.id===t.id) return;
+      const us=(u.startHour||0)*60+(u.startMin||0);
+      const ue=us+(u.plannedTime||60);
+      if(us<e && ue>s) maxCol=Math.max(maxCol, cols[u.id].col);
+    });
+    cols[t.id].total=maxCol+1;
+  });
+  return cols;
+}
+
+function renderTaskBlock(t, container, colInfo={col:0,total:1}){
   const startMins=(t.startHour||0)*60+(t.startMin||0);
   const dur=t.plannedTime||60;
   const top=minsToTop(startMins);
@@ -1298,7 +1366,13 @@ function renderTaskBlock(t, container){
   const el=document.createElement('div');
   el.className='tl-block';
   el.id='tl-block-'+t.id;
-  el.style.cssText=`top:${top}px;height:${height}px;background:${p.color}22;border:1.5px solid ${p.color}66;color:${p.color};left:58px;right:6px;position:absolute;cursor:grab`;
+  const col=colInfo.col||0;
+  const total=colInfo.total||1;
+  const tlLeft=58; // time label width px
+  const availW=`calc(100% - ${tlLeft}px)`;
+  const colW=`calc((100% - ${tlLeft}px) / ${total})`;
+  const colLeft=`calc(${tlLeft}px + (100% - ${tlLeft}px) / ${total} * ${col})`;
+  el.style.cssText=`top:${top}px;height:${height}px;background:${p.color}22;border:1.5px solid ${p.color}66;color:${p.color};position:absolute;cursor:grab;left:${colLeft};width:${colW};box-sizing:border-box;padding:0`;
 
   el.innerHTML=`
     <div class="tl-block-top-handle" data-id="${t.id}" style="position:absolute;top:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;background:linear-gradient(to top,transparent,${p.color}33);border-radius:6px 6px 0 0"></div>
@@ -1616,7 +1690,7 @@ function renderWeekly(){
     <div style="border-right:1px solid var(--border)"></div>
     ${dates.map(d=>{
       const isT=dailyDateStr(d)===todayS;
-      return`<div class="weekly-day-hd${isT?' today-col':''}" onclick="switchToDailyDate('${dailyDateStr(d)}')">${dayNames[d.getDay()]} ${d.getDate()}</div>`;
+      return`<div class="weekly-day-hd${isT?' today-col':''}" ondblclick="goToDailyDate('${dailyDateStr(d)}')" title="더블클릭 → 데일리">${dayNames[d.getDay()]} ${d.getDate()}</div>`;
     }).join('')}
   </div>`;
 
@@ -1698,10 +1772,15 @@ function renderWeekly(){
     tasks.filter(t=>t.due===ds && t.startHour!=null && t.startHour!=='' && t.startHour!==undefined).forEach(t=>{
       renderWeeklyTaskBlock(t, col);
     });
-    // GCal events
+    // GCal events (PM 작업과 중복 제거)
     gcalEvents.filter(e=>{
       if(!e.start.dateTime) return false;
-      return e.start.dateTime.split('T')[0]===ds;
+      if(e.start.dateTime.split('T')[0]!==ds) return false;
+      const isDuplicate=tasks.some(t=>
+        (t.gcalEventId&&t.gcalEventId===e.id)||
+        (t.due===ds&&t.name===e.summary&&t.startHour!==undefined)
+      );
+      return !isDuplicate;
     }).forEach(e=>renderWeeklyGcalBlock(e, col));
   });
 
@@ -1812,6 +1891,12 @@ function switchToDailyDate(ds){
   switchTab('daily');
 }
 
+function goToDailyDate(ds){
+  dailyDate=new Date(ds+'T00:00:00');
+  dailyDate.setHours(0,0,0,0);
+  switchTab('daily');
+}
+
 function onWeeklyTodoEnter(e){
   if(e.key!=='Enter') return;
   if(window._composing) return; // 한글 조합 중
@@ -1858,6 +1943,60 @@ function handleWeeklyCellClick(e, cell){
 }
 
 // ── Report ────────────────────────────────────────────────
+let monthlyYear=new Date().getFullYear(), monthlyMonth=new Date().getMonth();
+function changeMonthlyMonth(d){monthlyMonth+=d;if(monthlyMonth>11){monthlyMonth=0;monthlyYear++;}if(monthlyMonth<0){monthlyMonth=11;monthlyYear--;}renderMonthly();}
+function goMonthlyToday(){monthlyYear=new Date().getFullYear();monthlyMonth=new Date().getMonth();renderMonthly();}
+
+function renderMonthly(){
+  const MONTHS=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
+  const DAYS=['일','월','화','수','목','금','토'];
+  document.getElementById('monthly-label').textContent=monthlyYear+'년 '+MONTHS[monthlyMonth];
+  const today=new Date(); const todayS=todayStr();
+  const first=new Date(monthlyYear,monthlyMonth,1).getDay();
+  const daysInMonth=new Date(monthlyYear,monthlyMonth+1,0).getDate();
+  const prevDays=new Date(monthlyYear,monthlyMonth,0).getDate();
+
+  let html='<div class="monthly-grid">';
+  // Day labels
+  DAYS.forEach(d=>{ html+=`<div class="monthly-day-lbl">${d}</div>`; });
+  // Prev month padding
+  for(let i=0;i<first;i++){
+    const d=prevDays-first+1+i;
+    html+=`<div class="monthly-cell other-month"><div class="monthly-day-num">${d}</div></div>`;
+  }
+  // Days
+  for(let d=1;d<=daysInMonth;d++){
+    const ds=monthlyYear+'-'+String(monthlyMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
+    const isToday=ds===todayS;
+    const dayTasks=tasks.filter(t=>t.due===ds);
+    const gcalDay=gcalEvents.filter(e=>{
+      const ed=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
+      if(ed!==ds) return false;
+      const isDuplicate=tasks.some(t=>
+        (t.gcalEventId&&t.gcalEventId===e.id)||
+        (t.due===ds&&t.name===e.summary&&t.startHour!==undefined)
+      );
+      return !isDuplicate;
+    });
+    const allEvs=[
+      ...dayTasks.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return`<div class="monthly-ev" style="background:${p.color}${done?'11':'22'};color:${p.color};${done?'opacity:.45;text-decoration:line-through':''};border-left:2px solid ${p.color}" ondblclick="goToDailyDate('${ds}')" onclick="event.stopPropagation();openPanel(${t.id})">${t.name}</div>`;}),
+      ...gcalDay.map(e=>`<div class="monthly-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'};border-left:2px solid ${e._calColor||'#4285f4'}">${e.summary||''}</div>`)
+    ];
+    const MAX=3;
+    const evHtml=allEvs.slice(0,MAX).join('')+(allEvs.length>MAX?`<div class="monthly-more">+${allEvs.length-MAX}개</div>`:'');
+    html+=`<div class="monthly-cell${isToday?' today':''}" ondblclick="goToDailyDate('${ds}')">
+      <div class="monthly-day-num">${d}</div>
+      ${evHtml}
+    </div>`;
+  }
+  // Next month padding
+  const total=first+daysInMonth;
+  const remain=total%7===0?0:7-total%7;
+  for(let d=1;d<=remain;d++) html+=`<div class="monthly-cell other-month"><div class="monthly-day-num">${d}</div></div>`;
+  html+='</div>';
+  document.getElementById('monthly-wrap').innerHTML=html;
+}
+
 function renderReport(){
   // 완료된 작업(done)의 plannedTime만 집계
   function doneTime(taskList){
@@ -1878,6 +2017,45 @@ function renderReport(){
       <div class="rcard-sub">${p.taskCount}개 작업 · 완료 ${p.doneCount}개 (완료 시간만 집계)</div>
       <div class="rcard-bar"><div class="rcard-fill" style="width:${(p.total/maxT*100).toFixed(0)}%;background:${p.color}"></div></div>
     </div>`).join('');
+
+  // ── 월별 시간 차트 ──
+  const now=new Date();
+  const monthlyData=[];
+  for(let i=5;i>=0;i--){
+    const d=new Date(now.getFullYear(), now.getMonth()-i, 1);
+    const y=d.getFullYear(), m=d.getMonth();
+    const label=(m+1)+'월';
+    const monthTasks=tasks.filter(t=>{
+      if(t.status!=='done'||!t.plannedTime||!t.due) return false;
+      const td=new Date(t.due);
+      return td.getFullYear()===y && td.getMonth()===m;
+    });
+    const total=monthTasks.reduce((a,t)=>a+(t.plannedTime||0),0);
+    monthlyData.push({label,total,y,m});
+  }
+  const maxMonthly=Math.max(...monthlyData.map(d=>d.total),1);
+  // Insert monthly chart before report-grid
+  let monthlyChartEl=document.getElementById('report-monthly');
+  if(!monthlyChartEl){
+    monthlyChartEl=document.createElement('div');
+    monthlyChartEl.id='report-monthly';
+    monthlyChartEl.style.cssText='background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:16px;margin-bottom:18px';
+    document.getElementById('report-grid').parentNode.insertBefore(monthlyChartEl, document.getElementById('report-grid'));
+  }
+  monthlyChartEl.innerHTML=`
+    <div style="font-size:11px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;margin-bottom:14px">월별 완료 시간 (최근 6개월)</div>
+    <div style="display:flex;align-items:flex-end;gap:8px;height:80px">
+      ${monthlyData.map(d=>{
+        const pct=d.total?Math.max(8,(d.total/maxMonthly*100)):0;
+        const isCur=d.y===now.getFullYear()&&d.m===now.getMonth();
+        return`<div style="flex:1;display:flex;flex-direction:column;align-items:center;gap:4px">
+          <div style="font-size:11px;font-weight:600;color:var(--text2)">${d.total?fmtMins(d.total):''}</div>
+          <div style="width:100%;background:${isCur?'var(--blue)':'var(--blue)66'};border-radius:4px 4px 0 0;height:${pct}%;min-height:${d.total?4:0}px;transition:height .4s"></div>
+          <div style="font-size:11px;color:${isCur?'var(--blue)':'var(--text3)'};font-weight:${isCur?700:400}">${d.label}</div>
+        </div>`;
+      }).join('')}
+    </div>
+  `;
 
   // ── 트리 형식 로그 ──
   const logEl=document.getElementById('report-log');
