@@ -111,18 +111,6 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .tree-children{margin-left:0;margin-top:1px;display:flex;flex-direction:column;gap:1px}
 
 /* Calendar */
-.cal-split{display:grid;grid-template-columns:240px 1fr;gap:14px;align-items:start}
-@media(max-width:700px){.cal-split{grid-template-columns:1fr}}
-.cal-task-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;position:sticky;top:10px;max-height:calc(100vh - 140px);overflow-y:auto}
-.cal-grid-panel{}
-.cal-task-list{display:flex;flex-direction:column;gap:4px}
-.cal-task-item{display:flex;align-items:center;gap:8px;padding:7px 8px;border-radius:7px;border:1px solid transparent;cursor:pointer;transition:all .15s}
-.cal-task-item:hover{background:var(--bg);border-color:var(--border)}
-.cal-task-item.done-task{opacity:.6}
-.cal-task-date{font-size:10px;color:var(--text3);flex-shrink:0;min-width:32px}
-.cal-task-name{flex:1;font-size:12px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.cal-task-name.done{text-decoration:line-through;color:var(--text3)}
-.cal-section-label{font-size:10px;font-weight:700;color:var(--text3);text-transform:uppercase;letter-spacing:.06em;padding:8px 4px 4px;margin-top:4px}
 .cal-hd{display:flex;justify-content:space-between;align-items:center;margin-bottom:13px}
 .cal-m{font-size:15px;font-weight:600}
 .cal-nav{display:flex;gap:5px}
@@ -454,7 +442,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     <div class="nav-tabs">
       <button class="ntab active" onclick="switchTab('board')">보드</button>
       <button class="ntab" onclick="switchTab('list')">목록</button>
-      <button class="ntab" onclick="switchTab('cal')">먼슬리</button>
+      <button class="ntab" onclick="switchTab('cal')">캘린더</button>
       <button class="ntab" onclick="switchTab('daily')">데일리</button>
       <button class="ntab" onclick="switchTab('weekly')">위클리</button>
       <button class="ntab" onclick="switchTab('monthly')">먼슬리</button>
@@ -473,22 +461,14 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     <div class="tree-wrap" id="tree"></div>
   </div>
   <div id="view-cal" class="view">
-    <div class="cal-split">
-      <div class="cal-task-panel">
-        <div class="cal-hd" style="margin-bottom:14px">
-          <span class="cal-m" id="cal-month"></span>
-          <div class="cal-nav">
-            <button class="nbtn" onclick="changeMonth(-1)">&#8249;</button>
-            <button class="nbtn" onclick="changeMonth(1)">&#8250;</button>
-          </div>
-        </div>
-        <div class="sec-title" style="margin-bottom:8px">이달의 작업</div>
-        <div id="cal-task-list" class="cal-task-list"></div>
-      </div>
-      <div class="cal-grid-panel">
-        <div class="cg-full" id="cal-grid"></div>
+    <div class="cal-hd">
+      <span class="cal-m" id="cal-month"></span>
+      <div class="cal-nav">
+        <button class="nbtn" onclick="changeMonth(-1)">&#8249;</button>
+        <button class="nbtn" onclick="changeMonth(1)">&#8250;</button>
       </div>
     </div>
+    <div class="cg-full" id="cal-grid"></div>
   </div>
   <div id="view-daily" class="view">
     <div class="daily-nav">
@@ -1084,69 +1064,42 @@ function renderCal(){
   const first=new Date(calYear,calMonth,1).getDay();
   const days=new Date(calYear,calMonth+1,0).getDate();
   const prevDays=new Date(calYear,calMonth,0).getDate();
-  const today=new Date(); const ft=tasks.filter(t=>!selProjId||t.projId===selProjId);
+  const today=new Date();
+  const ft=tasks.filter(t=>!selProjId||t.projId===selProjId);
+  // Day labels as first row in same grid
   const dayLabels=['일','월','화','수','목','금','토'].map(d=>`<div class="dl">${d}</div>`).join('');
   let html=dayLabels;
-  for(let i=0;i<first;i++) html+=`<div class="day om"><div class="dn">${prevDays-first+1+i}</div></div>`;
+  for(let i=0;i<first;i++)html+=`<div class="day om"><div class="dn">${prevDays-first+1+i}</div></div>`;
   for(let d=1;d<=days;d++){
     const isToday=calYear===today.getFullYear()&&calMonth===today.getMonth()&&d===today.getDate();
     const ds=`${calYear}-${String(calMonth+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dt=ft.filter(t=>t.due===ds);
+    // Google Calendar events for this day
     const ge=gcalEvents.filter(e=>{
       const eDate=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
       if(eDate!==ds) return false;
-      return !tasks.some(t=>(t.gcalEventId&&t.gcalEventId===e.id)||(t.due===ds&&t.name===e.summary&&t.startHour!==undefined));
+      // PM 작업으로 만들어진 이벤트 중복 제거 (gcalEventId 또는 제목+날짜 매칭)
+      const isDuplicate=tasks.some(t=>
+        (t.gcalEventId&&t.gcalEventId===e.id) ||
+        (t.due===ds&&t.name===e.summary&&t.startHour!==undefined)
+      );
+      return !isDuplicate;
     });
+    const total=dt.length+ge.length;
+    // Mix and limit to 2 visible events, rest as +N
     const MAX_EV=2;
     const allEvs=[
-      ...dt.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return{html:`<div class="ev" style="background:${p.color}${done?'11':'22'};color:${p.color};flex-shrink:0;border-left:2px solid ${p.color};${done?'opacity:.4;text-decoration:line-through':''}" onclick="event.stopPropagation();toggleSelect(${t.id},'cal')" ondblclick="event.stopPropagation();openPanel(${t.id})">${t.name}</div>`};}),
+      ...dt.map(t=>{const p=getProj(t.projId);const done=t.status==="done";return{html:`<div class="ev" style="background:${p.color}${done?"11":"22"};color:${p.color};flex-shrink:0;border-left:2px solid ${p.color};${done?"opacity:.4;text-decoration:line-through":""}" onclick="toggleSelect(${t.id},'cal')" ondblclick="openPanel(${t.id})">${t.name}</div>`}}),
       ...ge.map(e=>({html:`<div class="ev" style="background:${e._calColor||'#4285f4'}33;color:${e._calColor||'#4285f4'};flex-shrink:0;border-left:2px solid ${e._calColor||'#4285f4'}">${e.summary||'(일정)'}</div>`}))
     ];
     const visEvs=allEvs.slice(0,MAX_EV).map(e=>e.html).join('');
     const more=allEvs.length>MAX_EV?`<div style="font-size:10px;color:var(--text3);margin-top:auto">+${allEvs.length-MAX_EV}개</div>`:'';
-    html+=`<div class="day ${isToday?'today':''}" ondblclick="goToDailyDate('${ds}')" title="더블클릭 → 데일리">
-      <div class="dn">${d}</div>${visEvs}${more}
-    </div>`;
+    html+=`<div class="day ${isToday?'today':''}"><div class="dn" style="flex-shrink:0">${d}</div>${visEvs}${more}</div>`;
   }
   const remain=(first+days)%7===0?0:7-(first+days)%7;
-  for(let d=1;d<=remain;d++) html+=`<div class="day om"><div class="dn">${d}</div></div>`;
+  for(let d=1;d<=remain;d++)html+=`<div class="day om"><div class="dn">${d}</div></div>`;
   document.getElementById('cal-grid').innerHTML=html;
-
-  // ── Render task list panel ──
-  const monthStr=`${calYear}-${String(calMonth+1).padStart(2,'0')}`;
-  const monthTasks=tasks.filter(t=>t.due&&t.due.startsWith(monthStr)&&(!selProjId||t.projId===selProjId));
-  monthTasks.sort((a,b)=>(a.due>b.due?1:-1));
-
-  const doneTasks=monthTasks.filter(t=>t.status==='done');
-  const todoTasks=monthTasks.filter(t=>t.status!=='done');
-
-  function makeCalTaskItem(t){
-    const p=getProj(t.projId);
-    const done=t.status==='done';
-    return`<div class="cal-task-item${done?' done-task':''}" onclick="openPanel(${t.id})">
-      <div class="chk ${done?'done':''}" onclick="quickToggle(${t.id},event)" style="width:14px;height:14px;font-size:9px;flex-shrink:0">✓</div>
-      <span style="width:6px;height:6px;border-radius:50%;background:${p.color};flex-shrink:0;display:inline-block"></span>
-      <span class="cal-task-name ${done?'done':''}">${t.name}</span>
-      <span class="cal-task-date">${t.due?t.due.slice(5).replace('-','/'):''}` </span>
-    </div>`;
-  }
-
-  const listEl=document.getElementById('cal-task-list');
-  if(!listEl) return;
-  let listHtml='';
-  if(todoTasks.length){
-    listHtml+=`<div class="cal-section-label">미완료 (${todoTasks.length})</div>`;
-    listHtml+=todoTasks.map(makeCalTaskItem).join('');
-  }
-  if(doneTasks.length){
-    listHtml+=`<div class="cal-section-label">완료 (${doneTasks.length})</div>`;
-    listHtml+=doneTasks.map(makeCalTaskItem).join('');
-  }
-  if(!monthTasks.length) listHtml='<div style="font-size:12px;color:var(--text3);padding:10px 0">이달의 작업 없음</div>';
-  listEl.innerHTML=listHtml;
 }
-
-
 function changeMonth(d){
   calMonth+=d;
   if(calMonth>11){calMonth=0;calYear++;}
