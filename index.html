@@ -959,7 +959,7 @@ function switchTab(tab){
   renderAll();
 }
 
-function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree();renderCal();renderDaily();renderWeekly();renderMonthly();renderReport();renderProjList();}
+function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree();renderCal();renderDaily();renderWeekly();renderReport();renderProjList();}
 
 // ── Proj Filter ───────────────────────────────────────────
 function renderProjFilter(){
@@ -1072,7 +1072,7 @@ function renderNode(task,depth,container){
 // ── Calendar ──────────────────────────────────────────────
 function renderCal(){
   const months=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
-  document.getElementById('cal-month').textContent=calYear+'년 '+months[calMonth];
+  const cmEl=document.getElementById('cal-month'); if(!cmEl) return; cmEl.textContent=calYear+'년 '+months[calMonth];
   const first=new Date(calYear,calMonth,1).getDay();
   const days=new Date(calYear,calMonth+1,0).getDate();
   const prevDays=new Date(calYear,calMonth,0).getDate();
@@ -1173,7 +1173,7 @@ function renderDaily(){
   const d=dailyDate;
   const days=['일','월','화','수','목','금','토'];
   const isToday=ds===todayStr();
-  document.getElementById('daily-date-label').textContent=
+  const ddEl=document.getElementById('daily-date-label'); if(ddEl) ddEl.textContent=
     d.getFullYear()+'년 '+(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+days[d.getDay()]+')'+(isToday?' — 오늘':'');
 
   // 오늘(해당일) 작업
@@ -1815,7 +1815,7 @@ function renderWeekly(){
   const dates=getWeekDates();
   const startStr=`${dates[0].getMonth()+1}/${dates[0].getDate()}`;
   const endStr=`${dates[6].getMonth()+1}/${dates[6].getDate()}`;
-  document.getElementById('weekly-label').textContent=`${dates[0].getFullYear()}년 ${startStr} - ${endStr}`;
+  const wlEl=document.getElementById('weekly-label'); if(wlEl) wlEl.textContent=`${dates[0].getFullYear()}년 ${startStr} - ${endStr}`;
 
   const dayNames=['일','월','화','수','목','금','토'];
   const todayS=todayStr();
@@ -2144,7 +2144,8 @@ function goMonthlyToday(){monthlyYear=new Date().getFullYear();monthlyMonth=new 
 function renderMonthly(){
   const MONTHS=['1월','2월','3월','4월','5월','6월','7월','8월','9월','10월','11월','12월'];
   const DAYS=['일','월','화','수','목','금','토'];
-  document.getElementById('monthly-label').textContent=monthlyYear+'년 '+MONTHS[monthlyMonth];
+  const mlEl=document.getElementById('monthly-label'); if(mlEl) mlEl.textContent=monthlyYear+'년 '+MONTHS[monthlyMonth];
+  const mwEl=document.getElementById('monthly-wrap'); if(!mwEl) return;
   const today=new Date(); const todayS=todayStr();
   const first=new Date(monthlyYear,monthlyMonth,1).getDay();
   const daysInMonth=new Date(monthlyYear,monthlyMonth+1,0).getDate();
@@ -2580,7 +2581,7 @@ window.addEventListener('beforeunload',()=>{
     setSyncStatus('syncing','동기화 중...');
     await loadFromDrive();
     await fetchGcalEvents();
-    renderDaily();renderWeekly();
+    renderAll();
   }
 })();
 </script>
