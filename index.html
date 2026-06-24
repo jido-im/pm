@@ -159,7 +159,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .time-input:focus{outline:none;border-color:var(--blue)}
 .time-lbl{font-size:11px;color:var(--text3)}
 /* timeline */
-.timeline-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;position:relative}
+.timeline-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow-y:auto;overflow-x:hidden;position:relative;max-height:calc(100vh - 180px)}
 .tl-inner{position:relative}
 .tl-row{display:flex;min-height:54px;border-bottom:1px solid var(--border);position:relative}
 .tl-row:last-child{border-bottom:none}
@@ -226,14 +226,14 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 
 /* Timeline */
 .timeline-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;position:relative}
-.tl-inner{position:relative;overflow:hidden}
-.tl-row{display:flex;min-height:30px;border-bottom:1px solid var(--border);position:relative}
-.tl-row.half{min-height:30px;border-bottom:1px dashed #f0ede8}
+.tl-inner{position:relative;overflow:hidden;display:flex;flex-direction:column}
+.tl-row{display:flex;height:30px;border-bottom:1px solid var(--border);position:relative;flex-shrink:0}
+.tl-row.half{height:30px;border-bottom:1px dashed #f0ede8;flex-shrink:0}
 .tl-row:last-child{border-bottom:none}
 .tl-row.is-now{background:#fffbf0}
-.tl-hour{width:52px;flex-shrink:0;font-size:11px;color:var(--text3);font-weight:500;padding:6px 8px 0;text-align:right;border-right:1px solid var(--border)}
+.tl-hour{width:52px;flex-shrink:0;font-size:11px;color:var(--text3);font-weight:500;padding:4px 8px 0;text-align:right;border-right:1px solid var(--border);align-self:flex-start}
 .tl-hour.half-lbl{font-size:10px;color:#ccc;padding-top:6px}
-.tl-slot{flex:1;padding:2px 6px;position:relative;min-height:30px}
+.tl-slot{flex:1;padding:2px 6px;position:relative}
 .tl-slot.drop-target{background:#E6F1FB44}
 .tl-block{position:absolute;left:6px;right:6px;border-radius:6px;cursor:grab;overflow:visible;z-index:2;min-height:26px;display:flex;flex-direction:column;justify-content:center;padding:3px 7px;font-size:12px;font-weight:500;box-shadow:0 1px 4px rgba(0,0,0,.1);transition:box-shadow .15s,outline .1s;user-select:none}
 .tl-block.selected{outline:2px solid var(--blue);outline-offset:1px;z-index:10}
