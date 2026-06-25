@@ -174,7 +174,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .tl-evt-dur{font-size:11px;opacity:.65;flex-shrink:0}
 .tl-add{width:100%;text-align:left;font-size:12px;color:var(--text3);background:none;border:1.5px dashed transparent;cursor:pointer;padding:3px 4px;border-radius:5px;font-family:inherit;opacity:0;transition:all .15s}
 .tl-slot:hover .tl-add{opacity:1;border-color:var(--border2)}
-.tl-now-wrap{position:absolute;left:0;right:0;pointer-events:none;z-index:5}
+.tl-now-wrap{position:absolute;left:0;right:0;pointer-events:none;z-index:5;height:0}
 .tl-now-line{position:absolute;left:50px;right:0;height:2px;background:var(--red)}
 .tl-now-circle{position:absolute;left:44px;width:8px;height:8px;border-radius:50%;background:var(--red);top:-3px}
 /* summary */
@@ -226,7 +226,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 
 /* Timeline */
 .timeline-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:hidden;position:relative}
-.tl-inner{position:relative;overflow:hidden;display:flex;flex-direction:column}
+.tl-inner{position:relative;overflow:visible;display:flex;flex-direction:column}
 .tl-row{display:flex;height:30px;border-bottom:1px solid var(--border);position:relative;flex-shrink:0}
 .tl-row.half{height:30px;border-bottom:1px dashed #f0ede8;flex-shrink:0}
 .tl-row:last-child{border-bottom:none}
@@ -1386,11 +1386,16 @@ function renderDailyTimeline(ds, dayTasks){
   }
 
   // Now line
+  wrap.innerHTML=html;
+  // Render now line after DOM is set (so position:absolute works correctly)
   if(isToday){
     const nowPx=minsToTop(nowH*60+nowMin);
-    html+=`<div class="tl-now-wrap" style="top:${nowPx}px"><div class="tl-now-circle"></div><div class="tl-now-line"></div></div>`;
+    const nowEl=document.createElement('div');
+    nowEl.className='tl-now-wrap';
+    nowEl.style.top=nowPx+'px';
+    nowEl.innerHTML='<div class="tl-now-circle"></div><div class="tl-now-line"></div>';
+    wrap.appendChild(nowEl);
   }
-  wrap.innerHTML=html;
 
   // Show blocks from timeLogs for this date (preserves history)
   const logsForDay=timeLogs.filter(l=>l.date===ds);
@@ -1498,39 +1503,88 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
     <div class="tl-block-resize" data-id="${t.id}" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,${p.color}33);border-radius:0 0 6px 6px;z-index:11"></div>
   `;
 
-  // ── Mouse drag to MOVE (중간 영역만) ──
+  // ── Mouse drag: normal=move, Cmd=add log, Option/Alt=copy ──
   el.addEventListener('mousedown', e=>{
-    // 핸들 영역이면 무시 (리사이즈 핸들에서 처리)
     if(e.target.classList.contains('tl-block-resize')||e.target.classList.contains('tl-block-top-handle')) return;
     e.preventDefault();
     selectBlock(t.id);
+    const isCmdDrag=e.metaKey||e.ctrlKey; // Cmd/Ctrl = add log
+    const isOptDrag=e.altKey;              // Option/Alt = copy task
     const startY=e.clientY;
     const origTop=parseInt(el.style.top);
+    const ds=dailyDateStr(dailyDate);
     let moved=false;
+
+    // Visual clone for cmd/opt drag
+    let ghost=null;
+    if(isCmdDrag||isOptDrag){
+      ghost=el.cloneNode(true);
+      ghost.style.opacity='0.5';
+      ghost.style.pointerEvents='none';
+      ghost.style.zIndex='999';
+      el.parentNode.appendChild(ghost);
+    }
+
     function onMove(mv){
       moved=true;
       const dy=mv.clientY-startY;
       const newTop=Math.max(0, origTop+dy);
-      el.style.top=newTop+'px';
-      el.style.opacity='0.7';
+      if(isCmdDrag||isOptDrag){
+        // 원본은 그대로, ghost만 이동
+        if(ghost) ghost.style.top=newTop+'px';
+        el.style.opacity='0.85';
+      } else {
+        el.style.top=newTop+'px';
+        el.style.opacity='0.7';
+      }
       el.style.cursor='grabbing';
     }
+
     function onUp(mv){
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
       el.style.opacity='1';
       el.style.cursor='grab';
-      if(!moved){ return; }
+      if(ghost) ghost.remove();
+
+      if(!moved) return;
       pushUndo();
-      // Snap to 30min grid
-      const newTop=parseInt(el.style.top);
-      const newMins=Math.round(newTop/SLOT_H)*30;
-      t.startHour=Math.floor(newMins/60);
-      t.startMin=newMins%60;
-      // Update timeLogs
-      const ds2=dailyDateStr(dailyDate);
-      const lg=timeLogs.find(l=>l.taskId===t.id&&l.date===ds2);
-      if(lg){lg.startHour=t.startHour;lg.startMin=t.startMin;}
+
+      const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top);
+      const newMins=Math.round(targetTop/SLOT_H)*30;
+      const newH=Math.floor(newMins/60);
+      const newM=newMins%60;
+
+      if(isCmdDrag){
+        // Cmd+drag: add new log to same task (different date if weekly, same date if daily)
+        const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
+        if(existLog){
+          existLog.startHour=newH; existLog.startMin=newM;
+        } else {
+          timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        }
+        showToast('같은 작업에 시간 추가됐어요');
+      } else if(isOptDrag){
+        // Option+drag: create completely new independent task copy
+        const newTask={
+          ...JSON.parse(JSON.stringify(t)),
+          id:nextTaskId++,
+          startHour:newH, startMin:newM,
+          due:ds, status:'todo',
+          name:t.name // same name, independent task
+        };
+        delete newTask._logId; delete newTask._fromLog;
+        tasks.unshift(newTask);
+        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        showToast('작업이 복사됐어요 (독립 작업)');
+      } else {
+        // Normal drag: move task
+        t.startHour=newH; t.startMin=newM;
+        const lg=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
+        if(lg){lg.startHour=newH;lg.startMin=newM;}
+        else{ timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId}); }
+        t.due=ds;
+      }
       saveLocal();scheduleSave();renderDaily();
     }
     document.addEventListener('mousemove',onMove);
@@ -1706,31 +1760,31 @@ function onSlotDrop(e, h, half){
   const id=parseInt(e.dataTransfer.getData(type==='move'?'blockId':'taskId'));
   const t=tasks.find(t=>t.id===id); if(!t) return;
   const ds=dailyDateStr(dailyDate);
+  // Use the slot's actual position for accurate drop time
+  const slotEl=e.currentTarget;
+  const rect=slotEl.getBoundingClientRect();
+  const relY=e.clientY-rect.top;
+  const snappedMins=Math.round(relY/SLOT_H)*30+(h*60)+(half?30:0);
+  const dropH=Math.max(0,Math.min(23,Math.floor(snappedMins/60)));
+  const dropM=snappedMins%60>=30?30:0;
   pushUndo();
 
   if(type==='move'){
-    // 블록 이동: 같은 날이면 log 업데이트, 다른 날이면 새 log
     const existingLog=timeLogs.find(l=>l.taskId===id&&l.date===ds);
     if(existingLog){
-      existingLog.startHour=h; existingLog.startMin=half?30:0;
+      existingLog.startHour=dropH; existingLog.startMin=dropM;
     } else {
-      // 다른 날짜로 이동 (기존 기록 보존)
-      timeLogs.push({id:nextLogId++,taskId:id,date:ds,startHour:h,startMin:half?30:0,duration:t.plannedTime||60,projId:t.projId});
+      timeLogs.push({id:nextLogId++,taskId:id,date:ds,startHour:dropH,startMin:dropM,duration:t.plannedTime||60,projId:t.projId});
     }
-    t.startHour=h; t.startMin=half?30:0;
-    t.due=ds;
+    t.startHour=dropH; t.startMin=dropM; t.due=ds;
   } else {
-    // 투두/이월 작업 → 시간표 드롭
     const existingLog=timeLogs.find(l=>l.taskId===id&&l.date===ds);
     if(existingLog){
-      existingLog.startHour=h; existingLog.startMin=half?30:0;
+      existingLog.startHour=dropH; existingLog.startMin=dropM;
     } else {
-      // 새 log — 기존 날짜 기록은 그대로 유지
-      timeLogs.push({id:nextLogId++,taskId:id,date:ds,startHour:h,startMin:half?30:0,duration:t.plannedTime||60,projId:t.projId});
+      timeLogs.push({id:nextLogId++,taskId:id,date:ds,startHour:dropH,startMin:dropM,duration:t.plannedTime||60,projId:t.projId});
     }
-    // task due를 오늘로 업데이트 (이월 작업 포함)
-    t.startHour=h; t.startMin=half?30:0;
-    t.due=ds;
+    t.startHour=dropH; t.startMin=dropM; t.due=ds;
     if(!t.plannedTime) t.plannedTime=60;
   }
   saveLocal(); scheduleSave();
@@ -1931,6 +1985,7 @@ function renderWeekly(){
     const ds=dailyDateStr(d);
     const col=document.getElementById('wcol-'+ds);
     if(!col) return;
+    col._date=d; // store date object for drag handler
 
     // PM tasks for this day
     const dayTasks=tasks.filter(t=>t.due===ds&&t.startHour!=null&&t.startHour!==''&&t.startHour!==undefined);
@@ -1987,28 +2042,98 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   const el=document.createElement('div');
   el.className='weekly-block';
   el.id='wb-'+t.id;
-  el.style.cssText=`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};overflow:visible`;
-  el.draggable=true;
-  el.innerHTML=`<div class="weekly-block-name">${t.name}</div><div class="weekly-block-time">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div><div class="weekly-block-resize" data-id="${t.id}"></div>`;
+  el.style.cssText=`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};overflow:visible;position:absolute`;
 
-  el.addEventListener('dragstart',e=>{
+  el.innerHTML=`
+    <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
+    <div class="weekly-block-name" style="padding:2px 5px;pointer-events:none">${t.name}</div>
+    <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
+    <div class="weekly-block-resize" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;border-radius:0 0 4px 4px"></div>
+  `;
+
+  const ds=dailyDateStr(col._date||new Date());
+
+  // ── Mouse drag: normal=move, Cmd=add log, Option=copy ──
+  el.addEventListener('mousedown', e=>{
+    if(e.target.classList.contains('weekly-block-resize')||e.target.classList.contains('weekly-block-top-handle')) return;
+    e.preventDefault();
     e.stopPropagation();
-    window._dragId=t.id;
-    e.dataTransfer.setData('text/plain',String(t.id));
-    e.dataTransfer.effectAllowed='move';
+    const isCmdDrag=e.metaKey||e.ctrlKey;
+    const isOptDrag=e.altKey;
+    const startX=e.clientX, startY=e.clientY;
+    const origTop=parseInt(el.style.top);
+    let moved=false, ghost=null;
+
+    if(isCmdDrag||isOptDrag){
+      ghost=el.cloneNode(true);
+      ghost.style.opacity='0.5';ghost.style.pointerEvents='none';ghost.style.zIndex='999';
+      el.parentNode.appendChild(ghost);
+    }
+
+    function onMove(mv){
+      moved=true;
+      const dy=mv.clientY-startY;
+      const newTop=Math.max(0,origTop+dy);
+      if(isCmdDrag||isOptDrag){ if(ghost) ghost.style.top=newTop+'px'; el.style.opacity='0.85'; }
+      else{ el.style.top=newTop+'px'; el.style.opacity='0.7'; }
+    }
+    function onUp(){
+      document.removeEventListener('mousemove',onMove);
+      document.removeEventListener('mouseup',onUp);
+      el.style.opacity='1';
+      if(ghost) ghost.remove();
+      if(!moved) return;
+      pushUndo();
+
+      const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top)||origTop;
+      const newMins=Math.round(targetTop/SLOT_H)*30;
+      const newH=Math.floor(newMins/60);
+      const newM=newMins%60;
+
+      if(isCmdDrag){
+        const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
+        if(existLog){ existLog.startHour=newH; existLog.startMin=newM; }
+        else timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        showToast('같은 작업에 시간 추가됐어요');
+      } else if(isOptDrag){
+        const newTask={...JSON.parse(JSON.stringify(t)),id:nextTaskId++,startHour:newH,startMin:newM,due:ds,status:'todo'};
+        delete newTask._logId; delete newTask._fromLog;
+        tasks.unshift(newTask);
+        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        showToast('작업이 복사됐어요 (독립 작업)');
+      } else {
+        // Normal move: update log for old date → new date
+        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(t.due||ds));
+        if(oldLog){ oldLog.startHour=newH; oldLog.startMin=newM; oldLog.date=ds; }
+        else timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        t.startHour=newH; t.startMin=newM; t.due=ds;
+      }
+      saveLocal();scheduleSave();renderWeekly();renderDaily();
+    }
+    document.addEventListener('mousemove',onMove);
+    document.addEventListener('mouseup',onUp);
   });
+
   el.addEventListener('click',e=>{e.stopPropagation();toggleSelect(t.id,'cal');});
   el.addEventListener('dblclick',e=>{e.stopPropagation();openPanel(t.id);});
   el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();showCtxMenu(e,t.id,'block');});
 
+  // ── Bottom resize ──
   const resizeHandle=el.querySelector('.weekly-block-resize');
   resizeHandle.addEventListener('mousedown',e=>{
     e.stopPropagation();e.preventDefault();
-    startWeeklyResize(e,t.id,el);
+    startWeeklyResize(e,t.id,el,'bottom',ds);
+  });
+  // ── Top resize ──
+  const topHandle=el.querySelector('.weekly-block-top-handle');
+  topHandle.addEventListener('mousedown',e=>{
+    e.stopPropagation();e.preventDefault();
+    startWeeklyResize(e,t.id,el,'top',ds);
   });
 
   col.appendChild(el);
 }
+
 
 function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
   const start=new Date(e.start.dateTime);
@@ -2030,25 +2155,43 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
   col.appendChild(el);
 }
 
-function startWeeklyResize(e, taskId, el){
+function startWeeklyResize(e, taskId, el, direction='bottom', ds=null){
   const startY=e.clientY;
   const t=tasks.find(t=>t.id===taskId); if(!t) return;
   const startDur=t.plannedTime||60;
+  const startMins=(t.startHour||0)*60+(t.startMin||0);
+  const date=ds||dailyDateStr(dailyDate);
+
   function onMove(ev){
     const dy=ev.clientY-startY;
-    const newDur=Math.max(30,Math.round((startDur+dy/SLOT_H*30)/30)*30);
-    t.plannedTime=newDur;
-    el.style.height=Math.max(22,(newDur/30)*SLOT_H)+'px';
-    el.querySelector('.weekly-block-time').textContent=fmtHM(t.startHour,t.startMin||0)+' · '+fmtMins(newDur);
+    if(direction==='bottom'){
+      const newDur=Math.max(30,Math.round((startDur+dy/SLOT_H*30)/30)*30);
+      t.plannedTime=newDur;
+      el.style.height=Math.max(22,(newDur/30)*SLOT_H)+'px';
+    } else {
+      const deltaMins=Math.round(dy/SLOT_H)*30;
+      const newMins=Math.max(0,Math.min(startMins+deltaMins,startMins+startDur-30));
+      const newDur=Math.max(30,startDur-(newMins-startMins));
+      t.startHour=Math.floor(newMins/60); t.startMin=newMins%60; t.plannedTime=newDur;
+      el.style.top=minsToTop(newMins)+'px';
+      el.style.height=Math.max(22,(newDur/30)*SLOT_H)+'px';
+    }
+    const timeEl=el.querySelector('.weekly-block-time');
+    if(timeEl) timeEl.textContent=fmtHM(t.startHour,t.startMin||0)+' · '+fmtMins(t.plannedTime);
   }
   function onUp(){
     document.removeEventListener('mousemove',onMove);
     document.removeEventListener('mouseup',onUp);
+    // Update timeLogs
+    const lg=timeLogs.find(l=>l.taskId===taskId&&l.date===date);
+    if(lg){lg.startHour=t.startHour;lg.startMin=t.startMin;lg.duration=t.plannedTime;}
+    else{timeLogs.push({id:nextLogId++,taskId,date,startHour:t.startHour,startMin:t.startMin||0,duration:t.plannedTime,projId:t.projId});}
     saveLocal();scheduleSave();renderWeekly();renderDaily();
   }
   document.addEventListener('mousemove',onMove);
   document.addEventListener('mouseup',onUp);
 }
+
 
 function handleWeeklyColDrop(e, ds){
   e.preventDefault();
