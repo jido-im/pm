@@ -2034,34 +2034,57 @@ function startResize(e, taskId, el, direction='bottom'){
   const t=tasks.find(t=>t.id===taskId); if(!t) return;
   const startDur=t.plannedTime||60;
   const startMins=(t.startHour||0)*60+(t.startMin||0);
+  // 현재 el의 실제 top px 저장 (timeLogs 블록이면 el.style.top이 정확)
+  const startTopPx=parseInt(el.style.top)||minsToTop(startMins);
+
+  // 리사이즈 중 임시 값 추적 (스냅 없이 부드럽게)
+  let curDur=startDur;
+  let curMins=startMins;
 
   function onMove(ev){
     const dy=ev.clientY-startY;
     if(direction==='bottom'){
-      const newDur=Math.max(30, Math.round((startDur+dy/SLOT_H*30)/30)*30);
-      t.plannedTime=newDur;
-      el.style.height=Math.max(30,(newDur/30)*SLOT_H)+'px';
+      // 아래 핸들: duration 변경, top은 고정
+      const rawDur=startDur+dy/SLOT_H*30;
+      curDur=Math.max(30, Math.round(rawDur/30)*30);
+      el.style.height=Math.max(30,(curDur/30)*SLOT_H)+'px';
+      // task 데이터 실시간 업데이트 (렌더링용)
+      t.plannedTime=curDur;
     } else {
-      const deltaMins=Math.round(dy/SLOT_H)*30;
-      const newMins=Math.max(0, Math.min(startMins+deltaMins, startMins+startDur-30));
-      const newDur=Math.max(30, startDur-(newMins-startMins));
-      t.startHour=Math.floor(newMins/60);
-      t.startMin=newMins%60;
-      t.plannedTime=newDur;
-      el.style.top=minsToTop(newMins)+'px';
-      el.style.height=Math.max(30,(newDur/30)*SLOT_H)+'px';
+      // 위 핸들: top 위치와 duration 동시 변경
+      const rawMins=startMins+dy/SLOT_H*30;
+      const snappedMins=Math.round(rawMins/30)*30;
+      curMins=Math.max(0, Math.min(snappedMins, startMins+startDur-30));
+      curDur=Math.max(30, startDur-(curMins-startMins));
+      const newTop=minsToTop(curMins);
+      el.style.top=newTop+'px';
+      el.style.height=Math.max(30,(curDur/30)*SLOT_H)+'px';
+      t.startHour=Math.floor(curMins/60);
+      t.startMin=curMins%60;
+      t.plannedTime=curDur;
     }
     const timeEl=el.querySelector('.tl-block-time');
-    if(timeEl) timeEl.textContent=fmtHM(t.startHour,t.startMin||0)+' · '+fmtMins(t.plannedTime);
+    if(timeEl) timeEl.textContent=fmtHM(t.startHour||Math.floor(curMins/60), t.startMin||curMins%60)+' · '+fmtMins(curDur);
   }
+
   function onUp(){
     document.removeEventListener('mousemove',onMove);
     document.removeEventListener('mouseup',onUp);
     pushUndo();
-    // Update timeLogs if this block came from a log
+    // 최종 확정값으로 task 업데이트
+    t.plannedTime=curDur;
+    if(direction==='top'){
+      t.startHour=Math.floor(curMins/60);
+      t.startMin=curMins%60;
+    }
+    // timeLogs 업데이트 (이 날짜의 log가 있으면)
     const ds=dailyDateStr(dailyDate);
     const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
-    if(existLog){ existLog.startHour=t.startHour; existLog.startMin=t.startMin; existLog.duration=t.plannedTime; }
+    if(existLog){
+      existLog.startHour=t.startHour;
+      existLog.startMin=t.startMin||0;
+      existLog.duration=t.plannedTime;
+    }
     saveLocal(); scheduleSave(); renderDaily(); renderWeekly();
   }
   document.addEventListener('mousemove',onMove);
