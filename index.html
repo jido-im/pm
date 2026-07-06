@@ -291,6 +291,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-grid{min-width:560px}
 .weekly-header{display:grid;border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--card);z-index:20}
 .weekly-day-hd{font-size:12px;font-weight:600;text-align:center;padding:8px 4px;border-right:1px solid var(--border);color:var(--text2);cursor:pointer}
+.weekly-allday-row{display:grid;border-bottom:1px solid var(--border);background:var(--bg)}
+.weekly-allday-cell{border-right:1px solid var(--border);padding:2px 3px;min-height:20px;font-size:10px}
+.weekly-allday-ev{background:#4285f422;color:#4285f4;border-radius:3px;padding:1px 4px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
 .weekly-day-hd:last-child{border-right:none}
 .weekly-day-hd:hover{color:var(--blue)}
 .weekly-day-hd.today-col{color:var(--blue);font-weight:700}
@@ -1655,7 +1658,10 @@ function renderDailyTimeline(ds, dayTasks){
   const gcalAsBlocks=gcalForDay.map(e=>{
     const s=new Date(e.start.dateTime);
     const en=e.end?.dateTime?new Date(e.end.dateTime):new Date(s.getTime()+3600000);
-    return{_gcal:e, id:'g'+e.id, startHour:s.getHours(), startMin:s.getMinutes(), plannedTime:Math.round((en-s)/60000)};
+    const startMins=s.getHours()*60+s.getMinutes();
+    const maxMins=24*60-startMins;
+    const dur=Math.min(Math.round((en-s)/60000), maxMins);
+    return{_gcal:e, id:'g'+e.id, startHour:s.getHours(), startMin:s.getMinutes(), plannedTime:dur};
   });
 
   // Compute columns for ALL blocks together (PM + gcal)
@@ -1842,10 +1848,12 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
 }
 
 function renderGcalBlock(e, container, colInfo={col:0,total:1}){
+  if(!e.start.dateTime) return;
   const start=new Date(e.start.dateTime);
   const end=e.end?.dateTime?new Date(e.end.dateTime):new Date(start.getTime()+3600000);
   const startMins=start.getHours()*60+start.getMinutes();
-  const dur=Math.round((end-start)/60000);
+  const maxMins=24*60-startMins;
+  const dur=Math.min(Math.round((end-start)/60000), maxMins);
   const top=minsToTop(startMins);
   const height=Math.max(26,(dur/30)*SLOT_H);
   const color=e._calColor||'#4285f4';
@@ -2032,52 +2040,49 @@ function onSlotClick(h, half){
 function startResize(e, taskId, el, direction='bottom'){
   const startY=e.clientY;
   const t=tasks.find(t=>t.id===taskId); if(!t) return;
-  const startDur=t.plannedTime||60;
-  const startMins=(t.startHour||0)*60+(t.startMin||0);
-  // 현재 el의 실제 top px 저장 (timeLogs 블록이면 el.style.top이 정확)
-  const startTopPx=parseInt(el.style.top)||minsToTop(startMins);
 
-  // 리사이즈 중 임시 값 추적 (스냅 없이 부드럽게)
-  let curDur=startDur;
-  let curMins=startMins;
+  // 원본값 저장 (onMove 중에는 절대 건드리지 않음)
+  const origDur=t.plannedTime||60;
+  const origH=t.startHour||0;
+  const origM=t.startMin||0;
+  const origMins=origH*60+origM;
+
+  // 현재 확정값 추적 (onMove에서만 업데이트)
+  let curDur=origDur;
+  let curMins=origMins;
 
   function onMove(ev){
     const dy=ev.clientY-startY;
     if(direction==='bottom'){
-      // 아래 핸들: duration 변경, top은 고정
-      const rawDur=startDur+dy/SLOT_H*30;
+      const rawDur=origDur+dy/SLOT_H*30;
       curDur=Math.max(30, Math.round(rawDur/30)*30);
       el.style.height=Math.max(30,(curDur/30)*SLOT_H)+'px';
-      // task 데이터 실시간 업데이트 (렌더링용)
-      t.plannedTime=curDur;
     } else {
-      // 위 핸들: top 위치와 duration 동시 변경
-      const rawMins=startMins+dy/SLOT_H*30;
-      const snappedMins=Math.round(rawMins/30)*30;
-      curMins=Math.max(0, Math.min(snappedMins, startMins+startDur-30));
-      curDur=Math.max(30, startDur-(curMins-startMins));
-      const newTop=minsToTop(curMins);
-      el.style.top=newTop+'px';
+      const rawMins=origMins+dy/SLOT_H*30;
+      const snapped=Math.round(rawMins/30)*30;
+      curMins=Math.max(0, Math.min(snapped, origMins+origDur-30));
+      curDur=Math.max(30, origDur-(curMins-origMins));
+      el.style.top=minsToTop(curMins)+'px';
       el.style.height=Math.max(30,(curDur/30)*SLOT_H)+'px';
-      t.startHour=Math.floor(curMins/60);
-      t.startMin=curMins%60;
-      t.plannedTime=curDur;
     }
+    // 시간 텍스트만 업데이트 (task 데이터는 절대 건드리지 않음)
+    const displayH=direction==='bottom'?origH:Math.floor(curMins/60);
+    const displayM=direction==='bottom'?origM:curMins%60;
     const timeEl=el.querySelector('.tl-block-time');
-    if(timeEl) timeEl.textContent=fmtHM(t.startHour||Math.floor(curMins/60), t.startMin||curMins%60)+' · '+fmtMins(curDur);
+    if(timeEl) timeEl.textContent=fmtHM(displayH, displayM)+' · '+fmtMins(curDur);
   }
 
   function onUp(){
     document.removeEventListener('mousemove',onMove);
     document.removeEventListener('mouseup',onUp);
     pushUndo();
-    // 최종 확정값으로 task 업데이트
+    // onUp에서만 task 데이터 최종 확정
     t.plannedTime=curDur;
     if(direction==='top'){
       t.startHour=Math.floor(curMins/60);
       t.startMin=curMins%60;
     }
-    // timeLogs 업데이트 (이 날짜의 log가 있으면)
+    // timeLogs 업데이트
     const ds=dailyDateStr(dailyDate);
     const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
     if(existLog){
@@ -2154,6 +2159,19 @@ function renderWeekly(){
 
   const wrap = document.getElementById('weekly-tl-wrap');
 
+  // All-day events per day (종일 일정 - dateTime 없는 것)
+  const allDayByDay={};
+  dates.forEach(d=>{
+    const ds=dailyDateStr(d);
+    allDayByDay[ds]=gcalEvents.filter(e=>{
+      if(e.start.dateTime) return false;
+      const ed=e.start.date||'';
+      const endD=e.end?.date||ed;
+      return ed<=ds&&endD>ds;
+    });
+  });
+  const hasAllDay=Object.values(allDayByDay).some(evs=>evs.length>0);
+
   // Header
   let html = `<div class="weekly-header" style="display:grid;grid-template-columns:${TIME_COL}px repeat(${COLS},1fr)">
     <div style="border-right:1px solid var(--border)"></div>
@@ -2162,6 +2180,18 @@ function renderWeekly(){
       return`<div class="weekly-day-hd${isT?' today-col':''}" ondblclick="goToDailyDate('${dailyDateStr(d)}')" title="더블클릭 → 데일리">${dayNames[d.getDay()]} ${d.getDate()}</div>`;
     }).join('')}
   </div>`;
+
+  // All-day row (종일 일정 헤더 아래에 별도 표시)
+  if(hasAllDay){
+    html+=`<div class="weekly-allday-row" style="display:grid;grid-template-columns:${TIME_COL}px repeat(${COLS},1fr)">
+      <div class="weekly-allday-cell" style="font-size:10px;color:var(--text3);display:flex;align-items:center;justify-content:flex-end;padding-right:6px">종일</div>
+      ${dates.map(d=>{
+        const ds=dailyDateStr(d);
+        const evs=allDayByDay[ds]||[];
+        return`<div class="weekly-allday-cell">${evs.map(e=>`<div class="weekly-allday-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'}">${e.summary||'(종일)'}</div>`).join('')}</div>`;
+      }).join('')}
+    </div>`;
+  }
 
   // Body: position:relative container
   html += `<div class="weekly-body" style="height:${TOTAL_PX}px;display:grid;grid-template-columns:${TIME_COL}px repeat(${COLS},1fr)">`;
@@ -2263,7 +2293,10 @@ function renderWeekly(){
     const gcalAsBlocks=gcalBlocks.map(e=>{
       const s=new Date(e.start.dateTime);
       const en=e.end?.dateTime?new Date(e.end.dateTime):new Date(s.getTime()+3600000);
-      return{_gcal:e,startHour:s.getHours(),startMin:s.getMinutes(),plannedTime:Math.round((en-s)/60000),id:'gcal-'+e.id};
+      const startMins=s.getHours()*60+s.getMinutes();
+      const maxMins=24*60-startMins;
+      const dur=Math.min(Math.round((en-s)/60000), maxMins);
+      return{_gcal:e,startHour:s.getHours(),startMin:s.getMinutes(),plannedTime:dur,id:'gcal-'+e.id};
     });
 
     // Compute columns for all blocks together
@@ -2388,10 +2421,14 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
 
 
 function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
+  // 종일 일정(dateTime 없음)은 시간표에 표시 안 함 — 헤더 종일 행에서 처리
+  if(!e.start.dateTime) return;
   const start=new Date(e.start.dateTime);
   const end=e.end?.dateTime?new Date(e.end.dateTime):new Date(start.getTime()+3600000);
   const startMins=start.getHours()*60+start.getMinutes();
-  const dur=Math.round((end-start)/60000);
+  // duration 최대 자정까지만 (당일을 넘어가는 일정 클리핑)
+  const maxMins=24*60-startMins;
+  const dur=Math.min(Math.round((end-start)/60000), maxMins);
   const top=minsToTop(startMins);
   const height=Math.max(22,(dur/30)*SLOT_H);
   const color=e._calColor||'#4285f4';
@@ -2410,33 +2447,43 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
 function startWeeklyResize(e, taskId, el, direction='bottom', ds=null){
   const startY=e.clientY;
   const t=tasks.find(t=>t.id===taskId); if(!t) return;
-  const startDur=t.plannedTime||60;
-  const startMins=(t.startHour||0)*60+(t.startMin||0);
+  const origDur=t.plannedTime||60;
+  const origH=t.startHour||0;
+  const origM=t.startMin||0;
+  const origMins=origH*60+origM;
   const date=ds||dailyDateStr(dailyDate);
+  let curDur=origDur;
+  let curMins=origMins;
 
   function onMove(ev){
     const dy=ev.clientY-startY;
     if(direction==='bottom'){
-      const newDur=Math.max(30,Math.round((startDur+dy/SLOT_H*30)/30)*30);
-      t.plannedTime=newDur;
-      el.style.height=Math.max(22,(newDur/30)*SLOT_H)+'px';
+      curDur=Math.max(30,Math.round((origDur+dy/SLOT_H*30)/30)*30);
+      el.style.height=Math.max(22,(curDur/30)*SLOT_H)+'px';
     } else {
       const deltaMins=Math.round(dy/SLOT_H)*30;
-      const newMins=Math.max(0,Math.min(startMins+deltaMins,startMins+startDur-30));
-      const newDur=Math.max(30,startDur-(newMins-startMins));
-      t.startHour=Math.floor(newMins/60); t.startMin=newMins%60; t.plannedTime=newDur;
-      el.style.top=minsToTop(newMins)+'px';
-      el.style.height=Math.max(22,(newDur/30)*SLOT_H)+'px';
+      curMins=Math.max(0,Math.min(origMins+deltaMins,origMins+origDur-30));
+      curDur=Math.max(30,origDur-(curMins-origMins));
+      el.style.top=minsToTop(curMins)+'px';
+      el.style.height=Math.max(22,(curDur/30)*SLOT_H)+'px';
     }
+    const displayH=direction==='bottom'?origH:Math.floor(curMins/60);
+    const displayM=direction==='bottom'?origM:curMins%60;
     const timeEl=el.querySelector('.weekly-block-time');
-    if(timeEl) timeEl.textContent=fmtHM(t.startHour,t.startMin||0)+' · '+fmtMins(t.plannedTime);
+    if(timeEl) timeEl.textContent=fmtHM(displayH,displayM)+' · '+fmtMins(curDur);
   }
   function onUp(){
     document.removeEventListener('mousemove',onMove);
     document.removeEventListener('mouseup',onUp);
-    // Update timeLogs
+    pushUndo();
+    // onUp에서만 task 데이터 확정
+    t.plannedTime=curDur;
+    if(direction==='top'){
+      t.startHour=Math.floor(curMins/60);
+      t.startMin=curMins%60;
+    }
     const lg=timeLogs.find(l=>l.taskId===taskId&&l.date===date);
-    if(lg){lg.startHour=t.startHour;lg.startMin=t.startMin;lg.duration=t.plannedTime;}
+    if(lg){lg.startHour=t.startHour;lg.startMin=t.startMin||0;lg.duration=t.plannedTime;}
     else{timeLogs.push({id:nextLogId++,taskId,date,startHour:t.startHour,startMin:t.startMin||0,duration:t.plannedTime,projId:t.projId});}
     saveLocal();scheduleSave();renderWeekly();renderDaily();
   }
