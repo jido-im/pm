@@ -1629,22 +1629,26 @@ function renderDailyTimeline(ds, dayTasks){
     wrap.appendChild(nowEl);
   }
 
-  // Show blocks from timeLogs for this date (preserves history)
+  // timeLogs 기준으로만 블록 렌더링 (Cmd+드래그로 여러 날짜에 log 추가해도 정확히 표시)
   const logsForDay=timeLogs.filter(l=>l.date===ds);
-  const allRelevantTasks=tasks.filter(t=>
-    t.due===ds||(t.startHour!==undefined&&t.startHour!==null&&t.startHour!==''&&logsForDay.find(l=>l.taskId===t.id))
+
+  // timeLogs에 없지만 t.due===ds && t.startHour 있는 것도 포함 (직접 드롭한 경우)
+  const loggedTaskIds=new Set(logsForDay.map(l=>l.taskId));
+  const unloggedScheduled=tasks.filter(t=>
+    t.due===ds &&
+    t.startHour!==undefined && t.startHour!==null && t.startHour!=='' &&
+    !loggedTaskIds.has(t.id)
   );
-  const scheduledTasks=allRelevantTasks.filter(t=>
-    t.startHour!==undefined&&t.startHour!==null&&t.startHour!==''&&
-    !logsForDay.find(l=>l.taskId===t.id)
-  );
+
   const pmBlocks=[
-    ...logsForDay.map(l=>({
-      ...tasks.find(t=>t.id===l.taskId)||{},
-      startHour:l.startHour, startMin:l.startMin,
-      plannedTime:l.duration, _logId:l.id, _fromLog:true
-    })).filter(b=>b.id),
-    ...scheduledTasks
+    // timeLogs 기반 블록 (날짜별 독립 기록)
+    ...logsForDay.map(l=>{
+      const task=tasks.find(t=>t.id===l.taskId);
+      if(!task) return null;
+      return{...task, startHour:l.startHour, startMin:l.startMin, plannedTime:l.duration, _logId:l.id, _fromLog:true};
+    }).filter(Boolean),
+    // log 없는 scheduled task
+    ...unloggedScheduled
   ];
 
   // gcal blocks for this day (deduplicated)
@@ -1791,34 +1795,40 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
       const newM=newMins%60;
 
       if(isCmdDrag){
-        // Cmd+drag: add new log to same task (different date if weekly, same date if daily)
+        // Cmd+drag: 같은 task에 새 날짜 timeLog 추가 (기존 블록 유지, t.due 절대 건드리지 않음)
         const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
         if(existLog){
           existLog.startHour=newH; existLog.startMin=newM;
         } else {
           timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
         }
-        showToast('같은 작업에 시간 추가됐어요');
+        // t.due, t.startHour 건드리지 않음 → 기존 블록 그대로 유지
+        showToast('같은 작업에 시간 추가됐어요 +'+ fmtMins(t.plannedTime||60));
       } else if(isOptDrag){
-        // Option+drag: create completely new independent task copy
+        // Option+drag: 이름 같은 완전히 독립된 새 task 생성
         const newTask={
-          ...JSON.parse(JSON.stringify(t)),
           id:nextTaskId++,
-          startHour:newH, startMin:newM,
-          due:ds, status:'todo',
-          name:t.name // same name, independent task
+          name:t.name,
+          parentId:null,
+          projId:t.projId,
+          memo:'',
+          status:'todo',
+          tag:t.tag||'STUDIO',
+          priority:t.priority||'mid',
+          due:ds,
+          plannedTime:t.plannedTime||60,
+          startHour:newH,
+          startMin:newM,
         };
-        delete newTask._logId; delete newTask._fromLog;
         tasks.unshift(newTask);
-        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
-        showToast('작업이 복사됐어요 (독립 작업)');
+        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:newTask.plannedTime,projId:newTask.projId});
+        showToast('독립 작업으로 복사됐어요');
       } else {
-        // Normal drag: move task
-        t.startHour=newH; t.startMin=newM;
-        const lg=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
-        if(lg){lg.startHour=newH;lg.startMin=newM;}
+        // Normal drag: 이동 (기존 날짜 log → 새 날짜로 변경)
+        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(t.due||ds));
+        if(oldLog){ oldLog.date=ds; oldLog.startHour=newH; oldLog.startMin=newM; }
         else{ timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId}); }
-        t.due=ds;
+        t.startHour=newH; t.startMin=newM; t.due=ds;
       }
       saveLocal();scheduleSave();renderDaily();
     }
@@ -2133,22 +2143,46 @@ function renderWeekly(){
 
   // Weekly todo: all tasks this week
   const weekStrs=dates.map(d=>dailyDateStr(d));
+  const weekStart=weekStrs[0];
   const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||t.status==='doing');
+
+  // 이월된 미완료: 이번 주 시작일 이전이고 미완료인 작업
+  const remainingTasks=tasks.filter(t=>{
+    if(t.status==='done') return false;
+    if(weekTasks.includes(t)) return false;
+    if(t.due && t.due < weekStart) return true;
+    return false;
+  });
+
   const wList=document.getElementById('weekly-todo-list');
-  wList.innerHTML=weekTasks.length===0
-    ?'<div style="font-size:12px;color:var(--text3)">이번 주 작업 없음</div>'
-    :weekTasks.map(t=>{
+
+  function makeWeeklyTodoItem(t, extra=''){
     const projBtns=projects.map(p=>`<div class="todo-swipe-proj" style="background:${p.color}" onclick="assignProj(event,${t.id},${p.id})">${p.icon}</div>`).join('');
-    return`<div class="todo-item" data-id="${t.id}" draggable="true" ondragstart="onTodoDragStart(event,${t.id})">
+    const isRemaining=extra==='remaining';
+    return`<div class="todo-item${isRemaining?' remaining':''}" data-id="${t.id}" draggable="true" ondragstart="onTodoDragStart(event,${t.id})">
       <div class="todo-swipe-right" id="swipe-right-${t.id}">${projBtns}</div>
       <div class="todo-swipe-left" id="swipe-left-${t.id}">🗑 삭제</div>
       <div class="todo-inner" id="todo-inner-${t.id}">
         <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
         <span class="todo-chk-dot" style="width:7px;height:7px;border-radius:50%;background:${getProj(t.projId).color};flex-shrink:0;display:inline-block"></span>
         <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px" onclick="openPanel(${t.id})">${t.name}</span>
+        ${isRemaining&&t.due?`<span class="remaining-date">${fmtDate(t.due)}</span>`:''}
         <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
       </div>
-    </div>`;}).join('');
+    </div>`;
+  }
+
+  const weekHtml=weekTasks.length===0
+    ?'<div style="font-size:12px;color:var(--text3)">이번 주 작업 없음</div>'
+    :weekTasks.map(t=>makeWeeklyTodoItem(t)).join('');
+
+  const remainHtml=remainingTasks.length>0?`
+    <div class="remaining-section">
+      <div class="remaining-header">이월된 미완료 (${remainingTasks.length})</div>
+      ${remainingTasks.map(t=>makeWeeklyTodoItem(t,'remaining')).join('')}
+    </div>`:'';
+
+  wList.innerHTML=(weekTasks.length===0?'<div style="font-size:12px;color:var(--text3);padding:4px 0">이번 주 작업 없음</div>':weekHtml)+remainHtml;
   wList.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
 
   // ── Weekly timeline: absolute positioning (same as daily) ──
@@ -2376,18 +2410,23 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
       const newM=newMins%60;
 
       if(isCmdDrag){
+        // Cmd+drag: 같은 task에 새 날짜 timeLog 추가 (t.due 건드리지 않음)
         const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
         if(existLog){ existLog.startHour=newH; existLog.startMin=newM; }
         else timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
-        showToast('같은 작업에 시간 추가됐어요');
+        showToast('같은 작업에 시간 추가됐어요 +'+fmtMins(t.plannedTime||60));
       } else if(isOptDrag){
-        const newTask={...JSON.parse(JSON.stringify(t)),id:nextTaskId++,startHour:newH,startMin:newM,due:ds,status:'todo'};
-        delete newTask._logId; delete newTask._fromLog;
+        // Option+drag: 이름 같은 완전히 독립된 새 task 생성
+        const newTask={
+          id:nextTaskId++, name:t.name, parentId:null, projId:t.projId,
+          memo:'', status:'todo', tag:t.tag||'STUDIO', priority:t.priority||'mid',
+          due:ds, plannedTime:t.plannedTime||60, startHour:newH, startMin:newM,
+        };
         tasks.unshift(newTask);
-        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
-        showToast('작업이 복사됐어요 (독립 작업)');
+        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:newTask.plannedTime,projId:newTask.projId});
+        showToast('독립 작업으로 복사됐어요');
       } else {
-        // Normal move: update log for old date → new date
+        // Normal move: 기존 log 날짜 변경
         const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(t.due||ds));
         if(oldLog){ oldLog.startHour=newH; oldLog.startMin=newM; oldLog.date=ds; }
         else timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
