@@ -738,15 +738,19 @@ let driveFileId=null,syncTimeout=null;
 let gcalEvents=[];
 let notionSyncTimer=null;
 const NOTION_SYNC_URL='https://jido-pm-notion.jisan-c50.workers.dev';
+localStorage.removeItem('jido_notion_sync_token');
 
 function getNotionSyncConfig(){
   return {
     url:(localStorage.getItem('jido_notion_sync_url')||NOTION_SYNC_URL).replace(/\/$/,''),
-    token:localStorage.getItem('jido_notion_sync_token')||''
+    token:sessionStorage.getItem('jido_notion_sync_token')||''
   };
 }
 
 function normalizeNotionId(value){ return String(value||'').replace(/-/g,'').toLowerCase(); }
+function esc(value){
+  return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
+}
 
 function mergeNotionData(payload){
   const incomingProjects=Array.isArray(payload.projects)?payload.projects:[];
@@ -780,7 +784,7 @@ function mergeNotionData(payload){
       local.name=remote.name;
       local.status=remote.status;
       local.due=remote.due||'';
-      if(remoteProjId) local.projId=remoteProjId;
+      local.projId=remoteProjId;
       local.notionId=remote.notionId;
       local.notionUrl=remote.notionUrl;
     }else{
@@ -801,7 +805,7 @@ async function syncFromNotion({silent=false}={}){
     if(silent) return;
     token=prompt('Cloudflare에 설정한 SYNC_TOKEN을 입력해주세요.')?.trim()||'';
     if(!token) return;
-    localStorage.setItem('jido_notion_sync_token',token);
+    sessionStorage.setItem('jido_notion_sync_token',token);
   }
   const btn=document.getElementById('btn-notion-sync');
   if(btn) btn.disabled=true;
@@ -811,10 +815,14 @@ async function syncFromNotion({silent=false}={}){
     const response=await fetch(url+'/api/notion/sync',{headers});
     const payload=await response.json().catch(()=>({}));
     if(!response.ok) throw new Error(payload.error||'Notion 동기화 실패');
+    const before=JSON.stringify({projects,tasks});
     pushUndo();
     mergeNotionData(payload);
-    saveLocal(); scheduleSave(); renderAll();
-    setSyncStatus('ok','Notion 동기화 완료');
+    const changed=before!==JSON.stringify({projects,tasks});
+    if(!changed) undoStack.pop();
+    if(changed){ saveLocal(); scheduleSave(); renderAll(); }
+    const syncedTime=new Date(payload.syncedAt||Date.now()).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
+    setSyncStatus('ok',`Notion 동기화 ${syncedTime}`);
     if(!silent) showToast(`Notion: 프로젝트 ${payload.projects.length}개, 작업 ${payload.tasks.length}개`);
   }catch(error){
     setSyncStatus('err','Notion 오류');
@@ -1188,7 +1196,7 @@ function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree()
 function renderProjFilter(){
   document.getElementById('proj-filter').innerHTML=
     `<button class="pchip" onclick="setFilter(null)" style="${selProjId===null?'border-width:2px;border-color:#555;font-weight:600':''}">전체</button>`+
-    projects.map(p=>`<button class="pchip" onclick="setFilter(${p.id})" style="${selProjId===p.id?'border-width:2px;border-color:'+p.color+';font-weight:600':''}"><span class="pchip-dot" style="background:${p.color}"></span>${p.name}</button>`).join('');
+    projects.map(p=>`<button class="pchip" onclick="setFilter(${p.id})" style="${selProjId===p.id?'border-width:2px;border-color:'+p.color+';font-weight:600':''}"><span class="pchip-dot" style="background:${p.color}"></span>${esc(p.name)}</button>`).join('');
 }
 function setFilter(id){selProjId=id;renderAll();}
 
@@ -1213,10 +1221,10 @@ function renderBoard(){
         const p=getProj(c.projId);const prog=calcProgress(c.id);
         return `<div class="card${c.status==='done'?' card-done':''}${selItems.has(c.id)?' selected':''}" onclick="toggleSelect(${c.id},'card')" ondblclick="openPanel(${c.id})">
           <div class="card-sel-dot">${selItems.has(c.id)?'✓':''}</div>
-          <div class="card-proj" style="color:${p.color}"><span style="width:5px;height:5px;border-radius:50%;background:${p.color};display:inline-block"></span> ${p.name}</div>
+          <div class="card-proj" style="color:${p.color}"><span style="width:5px;height:5px;border-radius:50%;background:${p.color};display:inline-block"></span> ${esc(p.name)}</div>
           <div class="card-title" style="display:flex;align-items:flex-start;gap:7px">
             <div class="chk ${c.status==='done'?'done':''}" onclick="quickToggle(${c.id},event)" style="margin-top:1px;flex-shrink:0">✓</div>
-            <span style="${c.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${c.name}</span>
+            <span onclick="event.stopPropagation();openPanel(${c.id})" style="cursor:pointer;${c.status==='done'?'text-decoration:line-through;color:var(--text3)':''}">${esc(c.name)}</span>
           </div>
           <div class="card-meta" style="margin-top:6px"><span class="tag ${TAGS[c.tag]?.cls||'tag-studio'}">${TAGS[c.tag]?.label||c.tag}</span><span class="due">${fmtDate(c.due)}</span></div>
           ${prog?`<div style="font-size:11px;color:var(--text3);margin-top:5px">${prog.done}/${prog.total} 완료</div><div class="prog-bar-wrap"><div class="prog-bar" style="width:${prog.pct}%"></div></div>`:''}
@@ -1253,7 +1261,7 @@ function renderTaskListPanel(){
   filterHtml+=`<button class="tl-filter-btn ${taskListFilter==='unassigned'?'active':''}" onclick="setTaskListFilter('unassigned')" style="${taskListFilter==='unassigned'?'border-color:var(--amber);color:var(--amber)':'color:var(--amber)'}">⚠ 미분류 ${unassignedCount>0?'('+unassignedCount+')':''}</button>`;
   projects.filter(p=>!p.parentId).forEach(p=>{
     const disp=getProjDisplay(p.id);
-    filterHtml+=`<button class="tl-filter-btn ${taskListFilter===p.id?'active':''}" onclick="setTaskListFilter(${p.id})" style="${taskListFilter===p.id?'border-color:'+disp.color+';color:'+disp.color:''}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${disp.color};margin-right:4px"></span>${p.name}</button>`;
+    filterHtml+=`<button class="tl-filter-btn ${taskListFilter===p.id?'active':''}" onclick="setTaskListFilter(${p.id})" style="${taskListFilter===p.id?'border-color:'+disp.color+';color:'+disp.color:''}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${disp.color};margin-right:4px"></span>${esc(p.name)}</button>`;
   });
   filterEl.innerHTML=filterHtml;
 
@@ -1282,7 +1290,7 @@ function renderTaskListPanel(){
       ondragstart="onTaskListDragStart(event,${t.id})">
       <div class="chk ${isDone?'done':''}" onclick="event.stopPropagation();quickToggle(${t.id},event)" style="width:15px;height:15px;font-size:9px;flex-shrink:0">✓</div>
       <span style="width:7px;height:7px;border-radius:50%;background:${isUnassigned?'var(--amber)':p.color};flex-shrink:0;display:inline-block"></span>
-      <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${t.name}</span>
+      <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${esc(t.name)}</span>
       ${prog?`<span style="font-size:10px;color:var(--text3)">${prog.done}/${prog.total}</span>`:''}
       ${t.due?`<span style="font-size:11px;color:var(--text3);flex-shrink:0">${fmtDate(t.due)}</span>`:''}
     </div>`;
@@ -1334,7 +1342,7 @@ function renderProjTreeNode(p, depth, container){
   head.innerHTML=`
     <span class="proj-tree-toggle">${hasChildren?(isCollapsed?'▶':'▼'):''}</span>
     <span class="proj-tree-icon">${disp.icon}</span>
-    <span class="proj-tree-name" style="color:${disp.color}">${p.name}</span>
+    <span class="proj-tree-name" style="color:${disp.color}">${esc(p.name)}</span>
     <span class="proj-tree-count">${taskCount}개</span>
     <button class="proj-tree-add" onclick="event.stopPropagation();openProjModal(null,${p.id})">+ 페이즈</button>
   `;
@@ -1417,8 +1425,8 @@ function renderCal(){
     });
     const MAX_EV=2;
     const allEvs=[
-      ...dt.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return{html:`<div class="ev" style="background:${p.color}${done?'11':'22'};color:${p.color};border-left:2px solid ${p.color};${done?'opacity:.4;text-decoration:line-through':''}" onclick="event.stopPropagation();toggleSelect(${t.id},'cal')" ondblclick="event.stopPropagation();openPanel(${t.id})">${t.name}</div>`};}),
-      ...ge.map(e=>({html:`<div class="ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'};border-left:2px solid ${e._calColor||'#4285f4'}">${e.summary||'(일정)'}</div>`}))
+      ...dt.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return{html:`<div class="ev" style="background:${p.color}${done?'11':'22'};color:${p.color};border-left:2px solid ${p.color};${done?'opacity:.4;text-decoration:line-through':''}" onclick="event.stopPropagation();toggleSelect(${t.id},'cal')" ondblclick="event.stopPropagation();openPanel(${t.id})">${esc(t.name)}</div>`};}),
+      ...ge.map(e=>({html:`<div class="ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'};border-left:2px solid ${e._calColor||'#4285f4'}">${esc(e.summary||'(일정)')}</div>`}))
     ];
     const visEvs=allEvs.slice(0,MAX_EV).map(e=>e.html).join('');
     const more=allEvs.length>MAX_EV?`<div style="font-size:10px;color:var(--text3)">+${allEvs.length-MAX_EV}개</div>`:'';
@@ -1444,7 +1452,7 @@ function renderCal(){
     return`<div class="cal-task-item${done?' done-task':''}" onclick="openPanel(${t.id})">
       <div class="chk ${done?'done':''}" onclick="quickToggle(${t.id},event)" style="width:14px;height:14px;font-size:9px;flex-shrink:0">✓</div>
       <span style="width:6px;height:6px;border-radius:50%;background:${p.color};flex-shrink:0;display:inline-block"></span>
-      <span class="cal-task-name ${done?'done':''}">${t.name}</span>
+      <span class="cal-task-name ${done?'done':''}">${esc(t.name)}</span>
       <span class="cal-task-date">${t.due?t.due.slice(5).replace('-','/'):''}</span>
     </div>`;
   }
@@ -1622,7 +1630,7 @@ function renderDailyTodo(dayTasks, remainingTasks=[]){
       <div class="todo-inner" id="todo-inner-${t.id}">
         <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
         <span class="todo-chk-dot" style="width:7px;height:7px;border-radius:50%;background:${getProj(t.projId).color};flex-shrink:0;display:inline-block"></span>
-        <span class="todo-name ${t.status==='done'?'done':''}" onclick="openPanel(${t.id})" style="flex:1">${t.name}</span>
+        <span class="todo-name ${t.status==='done'?'done':''}" onclick="openPanel(${t.id})" style="flex:1">${esc(t.name)}</span>
         ${timeStr?`<span class="todo-time">${timeStr}</span>`:''}
         <span class="remaining-date">${extra==='remaining'&&t.due?fmtDate(t.due):''}</span>
         <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
@@ -1678,7 +1686,7 @@ function renderDailyTodo(dayTasks, remainingTasks=[]){
     ${Object.entries(pm).map(([pid,m])=>{
       const p=getProj(parseInt(pid));
       return`<div class="proj-bar-row">
-        <div class="proj-bar-name">${p.icon} ${p.name}</div>
+        <div class="proj-bar-name">${esc(p.icon)} ${esc(p.name)}</div>
         <div class="proj-bar-wrap"><div class="proj-bar-fill" style="width:${(m/maxM*100).toFixed(0)}%;background:${p.color}"></div></div>
         <div class="proj-bar-n">${fmtMins(m)}</div>
       </div>`;
@@ -1832,7 +1840,7 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
   el.innerHTML=`
     <div class="tl-block-top-handle" data-id="${t.id}" style="position:absolute;top:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;background:linear-gradient(to top,transparent,${p.color}33);border-radius:6px 6px 0 0"></div>
     <div class="tl-block-body" style="padding:3px 7px;pointer-events:none;user-select:none">
-      <div class="tl-block-name">${t.name}</div>
+      <div class="tl-block-name">${esc(t.name)}</div>
       <div class="tl-block-time">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
     </div>
     <div class="tl-block-resize" data-id="${t.id}" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,${p.color}33);border-radius:0 0 6px 6px;z-index:11"></div>
@@ -1965,7 +1973,7 @@ function renderGcalBlock(e, container, colInfo={col:0,total:1}){
   const el=document.createElement('div');
   el.className='tl-block';
   el.style.cssText=`top:${top}px;height:${height}px;background:${color}22;border:1.5px solid ${color}55;color:${color};position:absolute;left:${colLeft};width:${colWidth};cursor:default;box-sizing:border-box;pointer-events:none`;
-  el.innerHTML=`<div class="tl-block-body" style="padding:3px 7px;pointer-events:none"><div class="tl-block-name">📅 ${e.summary||'(일정)'}</div><div class="tl-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div></div>`;
+  el.innerHTML=`<div class="tl-block-body" style="padding:3px 7px;pointer-events:none"><div class="tl-block-name">📅 ${esc(e.summary||'(일정)')}</div><div class="tl-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div></div>`;
   container.appendChild(el);
 }
 
@@ -2255,7 +2263,7 @@ function renderWeekly(){
       <div class="todo-inner" id="todo-inner-${t.id}">
         <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
         <span class="todo-chk-dot" style="width:7px;height:7px;border-radius:50%;background:${getProj(t.projId).color};flex-shrink:0;display:inline-block"></span>
-        <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px" onclick="openPanel(${t.id})">${t.name}</span>
+        <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px" onclick="openPanel(${t.id})">${esc(t.name)}</span>
         ${isRemaining&&t.due?`<span class="remaining-date">${fmtDate(t.due)}</span>`:''}
         <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
       </div>
@@ -2312,7 +2320,7 @@ function renderWeekly(){
       ${dates.map(d=>{
         const ds=dailyDateStr(d);
         const evs=allDayByDay[ds]||[];
-        return`<div class="weekly-allday-cell">${evs.map(e=>`<div class="weekly-allday-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'}">${e.summary||'(종일)'}</div>`).join('')}</div>`;
+        return`<div class="weekly-allday-cell">${evs.map(e=>`<div class="weekly-allday-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'}">${esc(e.summary||'(종일)')}</div>`).join('')}</div>`;
       }).join('')}
     </div>`;
   }
@@ -2455,7 +2463,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
 
   el.innerHTML=`
     <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
-    <div class="weekly-block-name" style="padding:2px 5px;pointer-events:none">${t.name}</div>
+    <div class="weekly-block-name" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
     <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
     <div class="weekly-block-resize" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;border-radius:0 0 4px 4px"></div>
   `;
@@ -2567,7 +2575,7 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
   const el=document.createElement('div');
   el.className='weekly-block';
   el.style.cssText=`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${color}22;border-left:3px solid ${color};color:${color};cursor:default;pointer-events:none`;
-  el.innerHTML=`<div class="weekly-block-name">📅 ${e.summary||''}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>`;
+  el.innerHTML=`<div class="weekly-block-name">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>`;
   col.appendChild(el);
 }
 
@@ -2743,8 +2751,8 @@ function renderMonthly(){
       return !isDuplicate;
     });
     const allEvs=[
-      ...dayTasks.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return`<div class="monthly-ev" style="background:${p.color}${done?'11':'22'};color:${p.color};${done?'opacity:.45;text-decoration:line-through':''};border-left:2px solid ${p.color}" ondblclick="goToDailyDate('${ds}')" onclick="event.stopPropagation();openPanel(${t.id})">${t.name}</div>`;}),
-      ...gcalDay.map(e=>`<div class="monthly-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'};border-left:2px solid ${e._calColor||'#4285f4'}">${e.summary||''}</div>`)
+      ...dayTasks.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return`<div class="monthly-ev" style="background:${p.color}${done?'11':'22'};color:${p.color};${done?'opacity:.45;text-decoration:line-through':''};border-left:2px solid ${p.color}" ondblclick="goToDailyDate('${ds}')" onclick="event.stopPropagation();openPanel(${t.id})">${esc(t.name)}</div>`;}),
+      ...gcalDay.map(e=>`<div class="monthly-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'};border-left:2px solid ${e._calColor||'#4285f4'}">${esc(e.summary||'')}</div>`)
     ];
     const MAX=3;
     const evHtml=allEvs.slice(0,MAX).join('')+(allEvs.length>MAX?`<div class="monthly-more">+${allEvs.length-MAX}개</div>`:'');
@@ -2773,7 +2781,7 @@ function renderReport(){
         const disp=getProjDisplay(p.id);
         const isActive=reportProjFilter===p.id;
         const indent='　'.repeat(depth);
-        return`<button class="pchip" onclick="setReportProjFilter(${p.id})" style="${isActive?'border-width:2px;border-color:'+disp.color+';font-weight:600;color:'+disp.color:''}">${indent}<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${disp.color};margin-right:4px;vertical-align:middle"></span>${disp.icon} ${p.name}</button>`;
+        return`<button class="pchip" onclick="setReportProjFilter(${p.id})" style="${isActive?'border-width:2px;border-color:'+disp.color+';font-weight:600;color:'+disp.color:''}">${indent}<span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${disp.color};margin-right:4px;vertical-align:middle"></span>${esc(disp.icon)} ${esc(p.name)}</button>`;
       }).join('')+projects.filter(p=>p.parentId===parentId).map(p=>buildProjFilterChips(p.id,depth+1)).join('');
     }
     projFilterEl.innerHTML=
@@ -2825,10 +2833,10 @@ function renderReport(){
     return{...p,icon:disp.icon,color:disp.color,total,taskCount:pt.length,doneCount:pt.filter(t=>t.status==='done').length};
   }).filter(p=>p.taskCount>0||p.total>0||reportProjFilter!==null);
   const maxT=Math.max(...pd.map(p=>p.total),1);
-  const filterLabel=(reportTagFilter?` · #${TAGS[reportTagFilter].label}`:'')+(reportProjFilter?` · ${getProjDisplay(reportProjFilter).name}`:'');
+  const filterLabel=(reportTagFilter?` · #${TAGS[reportTagFilter].label}`:'')+(reportProjFilter?` · ${esc(getProjDisplay(reportProjFilter).name)}`:'');
   document.getElementById('report-grid').innerHTML=pd.map(p=>`
-    <div class="rcard" onclick="setReportProjFilter(${p.id})" style="cursor:pointer" title="${p.name} 자세히 보기">
-      <div class="rcard-top"><div class="rcard-icon" style="background:${p.color}22">${p.icon}</div><div class="rcard-name">${p.name}</div></div>
+    <div class="rcard" onclick="setReportProjFilter(${p.id})" style="cursor:pointer" title="${esc(p.name)} 자세히 보기">
+      <div class="rcard-top"><div class="rcard-icon" style="background:${p.color}22">${esc(p.icon)}</div><div class="rcard-name">${esc(p.name)}</div></div>
       <div class="rcard-h" style="color:${p.color}">${fmtMins(p.total)||'0m'}</div>
       <div class="rcard-sub">${p.taskCount}개 작업 · 완료 ${p.doneCount}개${filterLabel||' (완료 시간만 집계)'}</div>
       <div class="rcard-bar"><div class="rcard-fill" style="width:${(p.total/maxT*100).toFixed(0)}%;background:${p.color}"></div></div>
@@ -2893,7 +2901,7 @@ function renderReport(){
       <div class="rt-proj-head" onclick="toggleReportProj(${p.id})">
         <span class="rt-arrow" id="rt-arr-${p.id}">▶</span>
         <span class="rt-proj-icon" style="background:${disp.color}22">${disp.icon}</span>
-        <span class="rt-proj-name">${p.name}</span>
+        <span class="rt-proj-name">${esc(p.name)}</span>
         <span class="rt-proj-time" style="color:${disp.color}">${fmtMins(projTotal)||'0m'}</span>
       </div>
       <div class="rt-proj-body" id="rt-body-${p.id}" style="display:none">
@@ -2918,8 +2926,8 @@ function renderReport(){
         const isDone=t.status==='done';
         return`<div class="log-row">
           <div class="log-date">${fmtDate(l.date)}</div>
-          <div class="log-proj"><span style="width:7px;height:7px;border-radius:50%;background:${p.color};display:inline-block;margin-right:3px"></span>${p.name}</div>
-          <div class="log-task" style="${isDone?'text-decoration:line-through;color:var(--text3)':''}min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${t.name}</div>
+          <div class="log-proj"><span style="width:7px;height:7px;border-radius:50%;background:${p.color};display:inline-block;margin-right:3px"></span>${esc(p.name)}</div>
+          <div class="log-task" style="${isDone?'text-decoration:line-through;color:var(--text3)':''}min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;flex:1">${esc(t.name)}</div>
           <div style="display:flex;align-items:center;gap:6px;flex-shrink:0">
             ${isDone?'<span style="font-size:10px;background:var(--green)22;color:var(--green);padding:1px 5px;border-radius:4px;font-weight:600">완료</span>':''}
             <div class="log-h">${fmtHM(l.startHour,l.startMin||0)} · ${fmtMins(l.duration)}</div>
@@ -2943,7 +2951,7 @@ function buildTaskTree(taskList, depth, color){
       <div class="rt-task" style="padding-left:${indent}px" onclick="${hasChildren?`toggleReportTask('rt-sub-${t.id}')`:''}" >
         ${hasChildren?`<span class="rt-sub-arrow" id="rt-sub-arr-${t.id}">▶</span>`:'<span style="width:14px;display:inline-block"></span>'}
         <span class="rt-task-chk ${isDone?'done':''}">${isDone?'✓':''}</span>
-        <span class="rt-task-name ${isDone?'':'rt-pending'}">${t.name}</span>
+        <span class="rt-task-name ${isDone?'':'rt-pending'}">${esc(t.name)}</span>
         ${time?`<span class="rt-task-time">${time}</span>`:''}
       </div>
       ${hasChildren?`<div id="rt-sub-${t.id}" style="display:none">${childrenHtml}</div>`:''}
@@ -2989,11 +2997,11 @@ function openPanel(id){
   // breadcrumb
   const ancestors=getAncestors(id);
   const bc=document.getElementById('sp-breadcrumb');
-  bc.innerHTML=ancestors.map(a=>`<span class="sp-bc-item" onclick="openPanel(${a.id})">${a.name}</span><span class="sp-bc-sep">›</span>`).join('')+`<span style="font-size:12px;color:var(--text2)">${t.name}</span>`;
+  bc.innerHTML=ancestors.map(a=>`<span class="sp-bc-item" onclick="openPanel(${a.id})">${esc(a.name)}</span><span class="sp-bc-sep">›</span>`).join('')+`<span style="font-size:12px;color:var(--text2)">${esc(t.name)}</span>`;
 
   // populate project select
   const sel=document.getElementById('sp-proj');
-  sel.innerHTML=projects.map(p=>`<option value="${p.id}">${p.icon} ${p.name}</option>`).join('');
+  sel.innerHTML=projects.map(p=>`<option value="${p.id}">${esc(p.icon)} ${esc(p.name)}</option>`).join('');
 
   document.getElementById('sp-title').value=t.name;
   sel.value=t.projId;
@@ -3022,7 +3030,7 @@ function renderPanelSubtasks(id){
   document.getElementById('sp-subtask-list').innerHTML=children.map(c=>`
     <div class="sp-sub-row" onclick="openPanel(${c.id})">
       <div class="chk ${c.status==='done'?'done':''}" onclick="quickToggle(${c.id},event)" style="width:14px;height:14px;font-size:9px">✓</div>
-      <span class="sp-sub-name ${c.status==='done'?'done':''}">${c.name}</span>
+      <span class="sp-sub-name ${c.status==='done'?'done':''}">${esc(c.name)}</span>
       ${c.due?`<span class="sp-sub-date">${fmtDate(c.due)}</span>`:''}
       <span class="sp-sub-chevron">›</span>
     </div>`).join('');
@@ -3038,6 +3046,7 @@ function autoSavePanel(){if(panelTaskId!==null)savePanel(true);}
 function savePanel(silent=false){
   if(panelTaskId===null)return;
   const t=tasks.find(t=>t.id===panelTaskId);if(!t)return;
+  pushUndo();
   t.name=document.getElementById('sp-title').value.trim()||t.name;
   t.projId=parseInt(document.getElementById('sp-proj').value);
   t.status=document.getElementById('sp-status').value;
@@ -3048,7 +3057,6 @@ function savePanel(silent=false){
   const sh=document.getElementById('sp-starthour').value;
   t.startHour=sh===''?undefined:parseInt(sh);
   t.memo=document.getElementById('sp-memo').value;
-  pushUndo();
   saveLocal();scheduleSave();syncTaskToGcal(t);
   if(!silent){showToast('저장됐어요');renderAll();}else{renderAll();}
 }
@@ -3195,7 +3203,7 @@ function buildParentProjOptions(excludeId=null){
       if(excludeIds.includes(p.id)) return;
       const indent='　'.repeat(depth);
       const icon=getProjDisplay(p.id).icon;
-      html+=`<option value="${p.id}">${indent}${depth>0?'└ ':''}${icon} ${p.name}</option>`;
+      html+=`<option value="${p.id}">${indent}${depth>0?'└ ':''}${esc(icon)} ${esc(p.name)}</option>`;
       html+=buildOptions(p.id, depth+1);
     });
     return html;
