@@ -99,6 +99,18 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .tl-filter-btn{font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-family:inherit;color:var(--text2);transition:all .15s;white-space:nowrap}
 .tl-filter-btn.active{border-width:2px;font-weight:600;color:var(--text)}
 .task-list-items{display:flex;flex-direction:column;gap:3px;max-height:calc(100vh - 220px);overflow-y:auto}
+.task-project-group{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:9px;background:#fff}
+.task-project-head{padding:11px 12px 9px;background:var(--bg);cursor:pointer}
+.task-project-title{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700}
+.task-project-title .grow{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.task-project-progress{display:flex;align-items:center;gap:8px;margin-top:8px}
+.task-project-progress-track{height:5px;background:#e8e7e3;border-radius:4px;overflow:hidden;flex:1}
+.task-project-progress-fill{height:100%;border-radius:4px;transition:width .25s}
+.task-project-progress-text{font-size:10px;color:var(--text3);min-width:64px;text-align:right}
+.task-project-body{padding:4px 6px 6px}
+.task-status-pill{font-size:10px;padding:2px 6px;border-radius:8px;white-space:nowrap;background:#eee;color:var(--text2)}
+.task-status-pill.doing{background:#e6f1fb;color:#185fa5}.task-status-pill.review{background:#faeeda;color:#854f0b}.task-status-pill.done{background:#e1f5ee;color:#0f6e56}
+.task-phase-name{font-size:10px;color:var(--text3);white-space:nowrap;max-width:100px;overflow:hidden;text-overflow:ellipsis}
 .task-list-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;border:1px solid transparent;cursor:grab;transition:all .15s;user-select:none}
 .task-list-item:hover{background:var(--bg);border-color:var(--border)}
 .task-list-item.dragging-item{opacity:.4}
@@ -1281,19 +1293,43 @@ function renderTaskListPanel(){
     return;
   }
 
-  itemsEl.innerHTML=filteredT.map(t=>{
-    const p=getProjDisplay(t.projId);
-    const isDone=t.status==='done';
-    const isUnassigned=!t.projId||!projects.find(pr=>pr.id===t.projId);
-    const prog=calcProgress(t.id);
-    return`<div class="task-list-item${isUnassigned?' unassigned':''}" data-id="${t.id}" draggable="true"
-      ondragstart="onTaskListDragStart(event,${t.id})">
-      <div class="chk ${isDone?'done':''}" onclick="event.stopPropagation();quickToggle(${t.id},event)" style="width:15px;height:15px;font-size:9px;flex-shrink:0">✓</div>
-      <span style="width:7px;height:7px;border-radius:50%;background:${isUnassigned?'var(--amber)':p.color};flex-shrink:0;display:inline-block"></span>
-      <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${esc(t.name)}</span>
-      ${prog?`<span style="font-size:10px;color:var(--text3)">${prog.done}/${prog.total}</span>`:''}
-      ${t.due?`<span style="font-size:11px;color:var(--text3);flex-shrink:0">${fmtDate(t.due)}</span>`:''}
-    </div>`;
+  const groups=[];
+  filteredT.forEach(t=>{
+    const root=getRootProj(t.projId);
+    const key=root?.id||'unassigned';
+    let group=groups.find(g=>g.key===key);
+    if(!group){ group={key,project:root||null,tasks:[]}; groups.push(group); }
+    group.tasks.push(t);
+  });
+  groups.sort((a,b)=>a.key==='unassigned'?1:b.key==='unassigned'?-1:(a.project?.name||'').localeCompare(b.project?.name||'','ko'));
+
+  itemsEl.innerHTML=groups.map(group=>{
+    const gp=group.project;
+    const disp=gp?getProjDisplay(gp.id):{name:'미분류',icon:'⚠',color:'var(--amber)'};
+    const doneCount=group.tasks.filter(t=>t.status==='done').length;
+    const pct=group.tasks.length?Math.round(doneCount/group.tasks.length*100):0;
+    const rows=group.tasks.map(t=>{
+      const isDone=t.status==='done';
+      const isUnassigned=!t.projId||!projects.find(pr=>pr.id===t.projId);
+      const directProject=projects.find(p=>p.id===t.projId);
+      const phase=directProject&&gp&&directProject.id!==gp.id?directProject.name:'';
+      const prog=calcProgress(t.id);
+      return`<div class="task-list-item${isUnassigned?' unassigned':''}" data-id="${t.id}" draggable="true" ondragstart="onTaskListDragStart(event,${t.id})">
+        <div class="chk ${isDone?'done':''}" onclick="event.stopPropagation();quickToggle(${t.id},event)" style="width:15px;height:15px;font-size:9px;flex-shrink:0">✓</div>
+        <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${esc(t.name)}</span>
+        ${phase?`<span class="task-phase-name" title="${esc(phase)}">${esc(phase)}</span>`:''}
+        ${prog?`<span style="font-size:10px;color:var(--text3)">${prog.done}/${prog.total}</span>`:''}
+        <span class="task-status-pill ${t.status}">${COLS[t.status]||'할 일'}</span>
+        ${t.due?`<span style="font-size:11px;color:var(--text3);flex-shrink:0">${fmtDate(t.due)}</span>`:''}
+      </div>`;
+    }).join('');
+    return`<section class="task-project-group">
+      <div class="task-project-head" ${gp?`onclick="setTaskListFilter(${gp.id})"`:''}>
+        <div class="task-project-title"><span>${esc(disp.icon)}</span><span class="grow">${esc(disp.name)}</span><span style="font-size:11px;color:var(--text3)">${group.tasks.length}개</span></div>
+        <div class="task-project-progress"><div class="task-project-progress-track"><div class="task-project-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div><span class="task-project-progress-text">${doneCount}/${group.tasks.length} 완료 · ${pct}%</span></div>
+      </div>
+      <div class="task-project-body">${rows}</div>
+    </section>`;
   }).join('');
 }
 
