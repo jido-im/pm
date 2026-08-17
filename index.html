@@ -738,7 +738,7 @@ let driveFileId=null,syncTimeout=null;
 let gcalEvents=[];
 let notionSyncTimer=null;
 const NOTION_SYNC_URL='https://jido-pm-notion.jisan-c50.workers.dev';
-localStorage.removeItem('jido_notion_sync_token');
+try{ localStorage.removeItem('jido_notion_sync_token'); }catch(e){}
 
 function getNotionSyncConfig(){
   return {
