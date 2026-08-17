@@ -737,10 +737,11 @@ let tokenExpiry=parseInt(sessionStorage.getItem('jido_token_expiry')||'0');
 let driveFileId=null,syncTimeout=null;
 let gcalEvents=[];
 let notionSyncTimer=null;
+const NOTION_SYNC_URL='https://jido-pm-notion.jisan-c50.workers.dev';
 
 function getNotionSyncConfig(){
   return {
-    url:(localStorage.getItem('jido_notion_sync_url')||'').replace(/\/$/,''),
+    url:(localStorage.getItem('jido_notion_sync_url')||NOTION_SYNC_URL).replace(/\/$/,''),
     token:localStorage.getItem('jido_notion_sync_token')||''
   };
 }
@@ -795,6 +796,12 @@ async function syncFromNotion({silent=false}={}){
     url=prompt('Notion Worker 주소를 입력해주세요. (예: https://jido-pm-notion.workers.dev)')?.trim().replace(/\/$/,'')||'';
     if(!url) return;
     localStorage.setItem('jido_notion_sync_url',url);
+  }
+  if(!token){
+    if(silent) return;
+    token=prompt('Cloudflare에 설정한 SYNC_TOKEN을 입력해주세요.')?.trim()||'';
+    if(!token) return;
+    localStorage.setItem('jido_notion_sync_token',token);
   }
   const btn=document.getElementById('btn-notion-sync');
   if(btn) btn.disabled=true;
