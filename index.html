@@ -471,6 +471,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     <div class="logo"><span class="logo-jido">jido.<em style="color:var(--blue);font-style:normal">pm</em></span></div>
     <div class="sync-bar">
       <div class="sync-pill"><span class="dot" id="sync-dot"></span><span id="sync-text">로그인 필요</span></div>
+      <button class="bsm" id="btn-notion-sync" onclick="syncFromNotion()" title="Notion Projects와 Tasks 가져오기">Notion 동기화</button>
       <button class="bsm pri" id="btn-signin" onclick="signIn()">Google 로그인</button>
       <button class="bsm" id="btn-migrate" onclick="migrateToTasksCalendar()" style="display:none" title="기존 일정을 Tasks 캘린더로 이전">📦 Tasks로 이전</button>
       <button class="bsm" id="btn-signout" onclick="signOut()" style="display:none">로그아웃</button>
@@ -693,6 +694,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 const CLIENT_ID='1029477374585-tjj1u15otjiu43jdsa7ccn1ntovihbue.apps.googleusercontent.com';
 const SCOPES='https://www.googleapis.com/auth/drive.appdata https://www.googleapis.com/auth/calendar';
 const FILE_NAME='jido-pm-v3.json';
+const NOTION_SYNC_INTERVAL=15*60*1000;
 const ICONS=['📁','🎨','💻','🚀','📱','🌐','✏️','🔧','📊','📝','🎯','💡','🔬','🎵','📷','🏗️'];
 const COLORS=['#378ADD','#E24B4A','#1D9E75','#EF9F27','#9B59B6','#E91E8C','#00BCD4','#FF5722','#607D8B','#795548','#4CAF50','#FF9800','#3F51B5','#009688','#F44336','#8BC34A'];
 const COLS={todo:'할 일',doing:'진행 중',review:'검토',done:'완료'};
@@ -734,6 +736,93 @@ let accessToken=sessionStorage.getItem('jido_token')||null;
 let tokenExpiry=parseInt(sessionStorage.getItem('jido_token_expiry')||'0');
 let driveFileId=null,syncTimeout=null;
 let gcalEvents=[];
+let notionSyncTimer=null;
+
+function getNotionSyncConfig(){
+  return {
+    url:(localStorage.getItem('jido_notion_sync_url')||'').replace(/\/$/,''),
+    token:localStorage.getItem('jido_notion_sync_token')||''
+  };
+}
+
+function normalizeNotionId(value){ return String(value||'').replace(/-/g,'').toLowerCase(); }
+
+function mergeNotionData(payload){
+  const incomingProjects=Array.isArray(payload.projects)?payload.projects:[];
+  const incomingTasks=Array.isArray(payload.tasks)?payload.tasks:[];
+  const projectIds=new Map();
+
+  incomingProjects.forEach((remote,index)=>{
+    const notionId=normalizeNotionId(remote.notionId);
+    let local=projects.find(p=>normalizeNotionId(p.notionId)===notionId);
+    if(!local) local=projects.find(p=>!p.notionId&&p.name.trim()===remote.name.trim());
+    if(local){
+      local.name=remote.name;
+      local.notionId=remote.notionId;
+      local.notionUrl=remote.notionUrl;
+      local.notionStage=remote.stage||'';
+    }else{
+      local={id:nextProjId++,name:remote.name,icon:ICONS[index%ICONS.length],color:COLORS[index%COLORS.length],desc:'',parentId:null,notionId:remote.notionId,notionUrl:remote.notionUrl,notionStage:remote.stage||''};
+      projects.push(local);
+    }
+    projectIds.set(notionId,local.id);
+  });
+
+  incomingTasks.forEach(remote=>{
+    const notionId=normalizeNotionId(remote.notionId);
+    const remoteProjId=projectIds.get(normalizeNotionId(remote.notionProjectId))||null;
+    let local=tasks.find(t=>normalizeNotionId(t.notionId)===notionId);
+    if(!local){
+      local=tasks.find(t=>!t.notionId&&t.name.trim()===remote.name.trim()&&(t.due||'')===(remote.due||'')&&(!remoteProjId||t.projId===remoteProjId));
+    }
+    if(local){
+      local.name=remote.name;
+      local.status=remote.status;
+      local.due=remote.due||'';
+      if(remoteProjId) local.projId=remoteProjId;
+      local.notionId=remote.notionId;
+      local.notionUrl=remote.notionUrl;
+    }else{
+      tasks.push({id:nextTaskId++,name:remote.name,parentId:null,projId:remoteProjId,memo:'',status:remote.status,tag:'STUDIO',priority:'mid',due:remote.due||'',plannedTime:0,notionId:remote.notionId,notionUrl:remote.notionUrl});
+    }
+  });
+}
+
+async function syncFromNotion({silent=false}={}){
+  let {url,token}=getNotionSyncConfig();
+  if(!url){
+    if(silent) return;
+    url=prompt('Notion Worker 주소를 입력해주세요. (예: https://jido-pm-notion.workers.dev)')?.trim().replace(/\/$/,'')||'';
+    if(!url) return;
+    localStorage.setItem('jido_notion_sync_url',url);
+  }
+  const btn=document.getElementById('btn-notion-sync');
+  if(btn) btn.disabled=true;
+  setSyncStatus('syncing','Notion 동기화 중...');
+  try{
+    const headers=token?{'Authorization':'Bearer '+token}:{};
+    const response=await fetch(url+'/api/notion/sync',{headers});
+    const payload=await response.json().catch(()=>({}));
+    if(!response.ok) throw new Error(payload.error||'Notion 동기화 실패');
+    pushUndo();
+    mergeNotionData(payload);
+    saveLocal(); scheduleSave(); renderAll();
+    setSyncStatus('ok','Notion 동기화 완료');
+    if(!silent) showToast(`Notion: 프로젝트 ${payload.projects.length}개, 작업 ${payload.tasks.length}개`);
+  }catch(error){
+    setSyncStatus('err','Notion 오류');
+    if(!silent) showToast(error.message||'Notion 동기화 실패');
+  }finally{
+    if(btn) btn.disabled=false;
+  }
+}
+
+function startNotionAutoSync(){
+  clearInterval(notionSyncTimer);
+  if(!getNotionSyncConfig().url) return;
+  syncFromNotion({silent:true});
+  notionSyncTimer=setInterval(()=>syncFromNotion({silent:true}),NOTION_SYNC_INTERVAL);
+}
 
 function isTokenValid(){
   return accessToken && Date.now() < tokenExpiry - 60000; // 1분 여유
@@ -1795,15 +1884,9 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
       const newM=newMins%60;
 
       if(isCmdDrag){
-        // Cmd+drag: 같은 task에 새 날짜 timeLog 추가 (기존 블록 유지, t.due 절대 건드리지 않음)
-        const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
-        if(existLog){
-          existLog.startHour=newH; existLog.startMin=newM;
-        } else {
-          timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
-        }
-        // t.due, t.startHour 건드리지 않음 → 기존 블록 그대로 유지
-        showToast('같은 작업에 시간 추가됐어요 +'+ fmtMins(t.plannedTime||60));
+        // Cmd+drag: 항상 새 timeLog 추가 (기존 log 절대 덮어쓰지 않음)
+        timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        showToast('같은 작업에 시간 추가됐어요 +'+fmtMins(t.plannedTime||60));
       } else if(isOptDrag){
         // Option+drag: 이름 같은 완전히 독립된 새 task 생성
         const newTask={
@@ -2411,9 +2494,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
 
       if(isCmdDrag){
         // Cmd+drag: 같은 task에 새 날짜 timeLog 추가 (t.due 건드리지 않음)
-        const existLog=timeLogs.find(l=>l.taskId===t.id&&l.date===ds);
-        if(existLog){ existLog.startHour=newH; existLog.startMin=newM; }
-        else timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
         showToast('같은 작업에 시간 추가됐어요 +'+fmtMins(t.plannedTime||60));
       } else if(isOptDrag){
         // Option+drag: 이름 같은 완전히 독립된 새 task 생성
@@ -3181,7 +3262,7 @@ function deleteProject(){
 
 
 // ── Init ──────────────────────────────────────────────────
-loadLocal();renderAll();
+loadLocal();renderAll();startNotionAutoSync();
 dailyDate=new Date();
 document.getElementById('proj-filter').style.display='flex';
 // 페이지 닫기/새로고침 전 즉시 저장
