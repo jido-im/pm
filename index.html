@@ -1,3 +1,4 @@
+syntax OK
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -1313,12 +1314,11 @@ function renderTaskListPanel(){
 
   countEl.textContent=filteredT.length+'개';
 
-  if(filteredT.length===0){
-    itemsEl.innerHTML='<div style="font-size:12px;color:var(--text3);padding:12px 0;text-align:center">작업 없음</div>';
-    return;
-  }
-
   const groups=[];
+  if(taskListFilter!=='unassigned'){
+    const visibleRoots=taskListFilter==='all'?projects.filter(p=>!p.parentId):projects.filter(p=>p.id===taskListFilter);
+    visibleRoots.forEach(project=>groups.push({key:project.id,project,tasks:[]}));
+  }
   filteredT.forEach(t=>{
     const root=getRootProj(t.projId);
     const key=root?.id||'unassigned';
@@ -1328,6 +1328,8 @@ function renderTaskListPanel(){
   });
   groups.forEach(group=>group.tasks.sort((a,b)=>(a.order||0)-(b.order||0)||a.id-b.id));
   groups.sort((a,b)=>a.key==='unassigned'?1:b.key==='unassigned'?-1:(a.project?.name||'').localeCompare(b.project?.name||'','ko'));
+
+  if(groups.length===0){itemsEl.innerHTML='<div style="font-size:12px;color:var(--text3);padding:12px 0;text-align:center">작업 없음</div>';return;}
 
   itemsEl.innerHTML=groups.map(group=>{
     const gp=group.project;
