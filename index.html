@@ -114,7 +114,10 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .task-list-item{display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:7px;border:1px solid transparent;cursor:grab;transition:all .15s;user-select:none}
 .task-list-item:hover{background:var(--bg);border-color:var(--border)}
 .task-list-item.dragging-item{opacity:.4}
+.task-list-item.drag-before{border-top:2px solid var(--blue);border-radius:0}
+.task-list-item.drag-after{border-bottom:2px solid var(--blue);border-radius:0}
 .task-list-item.unassigned{border-left:2px solid var(--amber)}
+.task-dependency{font-size:10px;color:var(--blue);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .proj-tree-panel{position:sticky;top:10px}
 .proj-tree-item{border-radius:var(--r2);margin-bottom:4px;overflow:visible}
 .proj-tree-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:var(--r2);border:1px solid var(--border);background:var(--card);cursor:pointer;transition:all .15s;user-select:none}
@@ -643,6 +646,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     </div>
     <div class="sp-row">
       <div class="sp-field"><div class="sp-label">시작 시간</div><select class="sp-select" id="sp-starthour" onchange="autoSavePanel()"><option value="">미정</option><option value="0">오전 12시</option><option value="1">오전 1시</option><option value="2">오전 2시</option><option value="3">오전 3시</option><option value="4">오전 4시</option><option value="5">오전 5시</option><option value="6">오전 6시</option><option value="7">오전 7시</option><option value="8">오전 8시</option><option value="9">오전 9시</option><option value="10">오전 10시</option><option value="11">오전 11시</option><option value="12">오후 12시</option><option value="13">오후 1시</option><option value="14">오후 2시</option><option value="15">오후 3시</option><option value="16">오후 4시</option><option value="17">오후 5시</option><option value="18">오후 6시</option><option value="19">오후 7시</option><option value="20">오후 8시</option><option value="21">오후 9시</option><option value="22">오후 10시</option><option value="23">오후 11시</option></select></div>
+      <div class="sp-field"><div class="sp-label">선행 작업</div><select class="sp-select" id="sp-dependency" onchange="autoSavePanel()"><option value="">없음</option></select></div>
     </div>
     <div class="sp-field"><div class="sp-label">메모</div><textarea class="sp-memo" id="sp-memo" placeholder="메모..." onblur="autoSavePanel()"></textarea></div>
     <div class="sp-divider"></div>
@@ -800,7 +804,7 @@ function mergeNotionData(payload){
       local.notionId=remote.notionId;
       local.notionUrl=remote.notionUrl;
     }else{
-      tasks.push({id:nextTaskId++,name:remote.name,parentId:null,projId:remoteProjId,memo:'',status:remote.status,tag:'STUDIO',priority:'mid',due:remote.due||'',plannedTime:0,notionId:remote.notionId,notionUrl:remote.notionUrl});
+      tasks.push({id:nextTaskId++,name:remote.name,parentId:null,projId:remoteProjId,memo:'',status:remote.status,tag:'STUDIO',priority:'mid',due:remote.due||'',plannedTime:0,order:nextTaskOrder(remoteProjId),notionId:remote.notionId,notionUrl:remote.notionUrl});
     }
   });
 }
@@ -1083,7 +1087,7 @@ document.addEventListener('keydown',e=>{
 });
 
 function saveLocal(){try{localStorage.setItem('jido_v3',JSON.stringify({projects,tasks,timeLogs,nextTaskId,nextProjId,nextLogId,_ts:Date.now()}));}catch(e){}}
-function loadLocal(){try{const d=localStorage.getItem('jido_v3');if(d){const p=JSON.parse(d);projects=p.projects||projects;tasks=p.tasks||tasks;timeLogs=p.timeLogs||[];nextTaskId=p.nextTaskId||nextTaskId;nextProjId=p.nextProjId||nextProjId;nextLogId=p.nextLogId||1;}}catch(e){}}
+function loadLocal(){try{const d=localStorage.getItem('jido_v3');if(d){const p=JSON.parse(d);projects=p.projects||projects;tasks=p.tasks||tasks;timeLogs=p.timeLogs||[];nextTaskId=p.nextTaskId||nextTaskId;nextProjId=p.nextProjId||nextProjId;nextLogId=p.nextLogId||1;}const counters={};tasks.forEach(t=>{const key=String(t.projId||0);counters[key]=(counters[key]||0)+1;if(!Number.isFinite(t.order))t.order=counters[key]*1000;});}catch(e){}}
 
 
 // ── Google Calendar Sync (auto-create/update events) ─────────────────
@@ -1301,6 +1305,7 @@ function renderTaskListPanel(){
     if(!group){ group={key,project:root||null,tasks:[]}; groups.push(group); }
     group.tasks.push(t);
   });
+  groups.forEach(group=>group.tasks.sort((a,b)=>(a.order||0)-(b.order||0)||a.id-b.id));
   groups.sort((a,b)=>a.key==='unassigned'?1:b.key==='unassigned'?-1:(a.project?.name||'').localeCompare(b.project?.name||'','ko'));
 
   itemsEl.innerHTML=groups.map(group=>{
@@ -1313,18 +1318,20 @@ function renderTaskListPanel(){
       const isUnassigned=!t.projId||!projects.find(pr=>pr.id===t.projId);
       const directProject=projects.find(p=>p.id===t.projId);
       const phase=directProject&&gp&&directProject.id!==gp.id?directProject.name:'';
+      const dependency=tasks.find(x=>x.id===t.dependsOn);
       const prog=calcProgress(t.id);
-      return`<div class="task-list-item${isUnassigned?' unassigned':''}" data-id="${t.id}" draggable="true" ondragstart="onTaskListDragStart(event,${t.id})">
+      return`<div class="task-list-item${isUnassigned?' unassigned':''}" data-id="${t.id}" draggable="true" ondragstart="onTaskListDragStart(event,${t.id})" ondragover="onTaskListDragOver(event,${t.id})" ondragleave="onTaskListDragLeave(event)" ondrop="onTaskListDrop(event,${t.id})">
         <div class="chk ${isDone?'done':''}" onclick="event.stopPropagation();quickToggle(${t.id},event)" style="width:15px;height:15px;font-size:9px;flex-shrink:0">✓</div>
         <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${esc(t.name)}</span>
         ${phase?`<span class="task-phase-name" title="${esc(phase)}">${esc(phase)}</span>`:''}
+        ${dependency?`<span class="task-dependency" title="선행 작업: ${esc(dependency.name)}">↳ ${esc(dependency.name)}</span>`:''}
         ${prog?`<span style="font-size:10px;color:var(--text3)">${prog.done}/${prog.total}</span>`:''}
         <span class="task-status-pill ${t.status}">${COLS[t.status]||'할 일'}</span>
         ${t.due?`<span style="font-size:11px;color:var(--text3);flex-shrink:0">${fmtDate(t.due)}</span>`:''}
       </div>`;
     }).join('');
     return`<section class="task-project-group">
-      <div class="task-project-head" ${gp?`onclick="setTaskListFilter(${gp.id})"`:''}>
+      <div class="task-project-head" ${gp?`onclick="setTaskListFilter(${gp.id})" ondragover="event.preventDefault()" ondrop="dropTaskIntoProject(event,${gp.id})"`:''}>
         <div class="task-project-title"><span>${esc(disp.icon)}</span><span class="grow">${esc(disp.name)}</span><span style="font-size:11px;color:var(--text3)">${group.tasks.length}개</span></div>
         <div class="task-project-progress"><div class="task-project-progress-track"><div class="task-project-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div><span class="task-project-progress-text">${doneCount}/${group.tasks.length} 완료 · ${pct}%</span></div>
       </div>
@@ -1336,6 +1343,54 @@ function renderTaskListPanel(){
 function setTaskListFilter(filter){
   taskListFilter=filter;
   renderTaskListPanel();
+}
+
+function nextTaskOrder(projId){
+  const same=tasks.filter(t=>t.projId===projId).map(t=>Number.isFinite(t.order)?t.order:0);
+  return (same.length?Math.max(...same):0)+1000;
+}
+
+function onTaskListDragOver(e,targetId){
+  e.preventDefault(); e.stopPropagation();
+  const row=e.currentTarget;
+  row.classList.remove('drag-before','drag-after');
+  const rect=row.getBoundingClientRect();
+  row.classList.add(e.clientY<rect.top+rect.height/2?'drag-before':'drag-after');
+  e.dataTransfer.dropEffect='move';
+}
+
+function onTaskListDrop(e,targetId){
+  e.preventDefault(); e.stopPropagation();
+  const row=e.currentTarget;
+  const after=row.classList.contains('drag-after');
+  row.classList.remove('drag-before','drag-after');
+  const dragId=window._dragId||parseInt(e.dataTransfer.getData('taskId')||e.dataTransfer.getData('text/plain'));
+  window._dragId=null;
+  if(!dragId||dragId===targetId) return;
+  const moving=tasks.find(t=>t.id===dragId), target=tasks.find(t=>t.id===targetId);
+  if(!moving||!target) return;
+  pushUndo();
+  moving.projId=target.projId;
+  const siblings=tasks.filter(t=>t.projId===target.projId&&t.id!==moving.id).sort((a,b)=>(a.order||0)-(b.order||0));
+  const idx=siblings.findIndex(t=>t.id===target.id)+(after?1:0);
+  siblings.splice(Math.max(0,idx),0,moving);
+  siblings.forEach((t,i)=>t.order=(i+1)*1000);
+  saveLocal();scheduleSave();renderAll();
+  showToast('작업 순서를 변경했어요');
+}
+
+function onTaskListDragLeave(e){
+  e.currentTarget.classList.remove('drag-before','drag-after');
+}
+
+function dropTaskIntoProject(e,projId){
+  e.preventDefault(); e.stopPropagation();
+  const taskId=window._dragId||parseInt(e.dataTransfer.getData('taskId')||e.dataTransfer.getData('text/plain'));
+  window._dragId=null;
+  const t=tasks.find(x=>x.id===taskId); if(!t) return;
+  pushUndo(); t.projId=projId; t.order=nextTaskOrder(projId);
+  saveLocal();scheduleSave();renderAll();
+  showToast('프로젝트로 이동했어요');
 }
 
 function onTaskListDragStart(e, id){
@@ -1412,6 +1467,7 @@ function renderProjTreeNode(p, depth, container){
     const t=tasks.find(t=>t.id===taskId); if(!t) return;
     pushUndo();
     t.projId=p.id;
+    t.order=nextTaskOrder(p.id);
     saveLocal();scheduleSave();renderAll();
     showToast(`"${p.name}"(으)로 이동했어요`);
   });
@@ -1945,6 +2001,7 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
           name:t.name,
           parentId:null,
           projId:t.projId,
+          order:nextTaskOrder(t.projId),
           memo:'',
           status:'todo',
           tag:t.tag||'STUDIO',
@@ -2174,7 +2231,7 @@ function onSlotDrop(e, h, half){
 function onSlotClick(h, half){
   // Quick add task at this time
   const ds=dailyDateStr(dailyDate);
-  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0};
+  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   tasks.unshift(newTask);
   saveLocal(); scheduleSave(); renderDaily();
   setTimeout(()=>openPanel(newTask.id),50);
@@ -2251,7 +2308,7 @@ function onTodoEnter(e){
   const name=input.value.trim(); if(!name) return;
   if(!dailyDate) dailyDate=new Date();
   const ds=dailyDateStr(dailyDate);
-  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:0};
+  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   pushUndo();
   tasks.unshift(newTask);
   input.value='';
@@ -2550,7 +2607,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
       } else if(isOptDrag){
         // Option+drag: 이름 같은 완전히 독립된 새 task 생성
         const newTask={
-          id:nextTaskId++, name:t.name, parentId:null, projId:t.projId,
+          id:nextTaskId++, name:t.name, parentId:null, projId:t.projId, order:nextTaskOrder(t.projId),
           memo:'', status:'todo', tag:t.tag||'STUDIO', priority:t.priority||'mid',
           due:ds, plannedTime:t.plannedTime||60, startHour:newH, startMin:newM,
         };
@@ -2711,14 +2768,14 @@ function onWeeklyTodoEnter(e){
   const name=input.value.trim(); if(!name) return;
   const dates=getWeekDates();
   const ds=dailyDateStr(dates[0]); // default to start of week
-  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:0};
+  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   pushUndo();
   tasks.unshift(newTask);
   input.value='';
   saveLocal();scheduleSave();renderWeekly();
 }
 function onWeekCellClick(ds,h,half){
-  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0};
+  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   tasks.unshift(newTask);
   saveLocal(); scheduleSave(); renderWeekly();
   setTimeout(()=>openPanel(newTask.id),50);
@@ -3038,6 +3095,9 @@ function openPanel(id){
   // populate project select
   const sel=document.getElementById('sp-proj');
   sel.innerHTML=projects.map(p=>`<option value="${p.id}">${esc(p.icon)} ${esc(p.name)}</option>`).join('');
+  const depSel=document.getElementById('sp-dependency');
+  const dependencyOptions=tasks.filter(x=>x.id!==id&&!dependencyWouldCycle(id,x.id)).sort((a,b)=>a.name.localeCompare(b.name,'ko'));
+  depSel.innerHTML='<option value="">없음</option>'+dependencyOptions.map(x=>`<option value="${x.id}">${esc(getProjDisplay(x.projId).name)} · ${esc(x.name)}</option>`).join('');
 
   document.getElementById('sp-title').value=t.name;
   sel.value=t.projId;
@@ -3047,6 +3107,7 @@ function openPanel(id){
   document.getElementById('sp-due').value=t.due||'';
   document.getElementById('sp-time').value=t.plannedTime||0;
   document.getElementById('sp-starthour').value=t.startHour??'';
+  depSel.value=t.dependsOn||'';
   document.getElementById('sp-memo').value=t.memo||'';
   document.getElementById('sp-btn-del').style.visibility='visible';
 
@@ -3055,6 +3116,16 @@ function openPanel(id){
 
   document.getElementById('sp-overlay').classList.add('open');
   document.getElementById('side-panel').classList.add('open');
+}
+
+function dependencyWouldCycle(taskId,candidateId){
+  let current=tasks.find(t=>t.id===candidateId), seen=new Set();
+  while(current&&current.dependsOn&&!seen.has(current.id)){
+    if(current.dependsOn===taskId) return true;
+    seen.add(current.id);
+    current=tasks.find(t=>t.id===current.dependsOn);
+  }
+  return false;
 }
 
 function renderPanelSubtasks(id){
@@ -3092,6 +3163,8 @@ function savePanel(silent=false){
   t.plannedTime=parseInt(document.getElementById('sp-time').value)||0;
   const sh=document.getElementById('sp-starthour').value;
   t.startHour=sh===''?undefined:parseInt(sh);
+  const dependencyValue=document.getElementById('sp-dependency').value;
+  t.dependsOn=dependencyValue?parseInt(dependencyValue):null;
   t.memo=document.getElementById('sp-memo').value;
   saveLocal();scheduleSave();syncTaskToGcal(t);
   if(!silent){showToast('저장됐어요');renderAll();}else{renderAll();}
@@ -3100,7 +3173,7 @@ function savePanel(silent=false){
 function addSubTask(){
   if(panelTaskId===null)return;
   const parent=tasks.find(t=>t.id===panelTaskId);
-  const newTask={id:nextTaskId++,name:'새 하위 작업',parentId:panelTaskId,projId:parent.projId,memo:'',status:'todo',tag:parent.tag||'STUDIO',priority:'mid',due:'',plannedTime:0};
+  const newTask={id:nextTaskId++,name:'새 하위 작업',parentId:panelTaskId,projId:parent.projId,memo:'',status:'todo',tag:parent.tag||'STUDIO',priority:'mid',due:'',plannedTime:0,order:nextTaskOrder(parent.projId)};
   pushUndo();
   tasks.push(newTask);
   saveLocal();scheduleSave();
@@ -3127,14 +3200,16 @@ function deleteTaskFromPanel(){
   showConfirm('이 작업과 하위 작업을 모두 삭제할까요?').then(ok=>{
     if(!ok)return;
     pushUndo();
-  const toDelete=[panelTaskId,...allDescendants(panelTaskId).map(t=>t.id)];
+    const toDelete=[panelTaskId,...allDescendants(panelTaskId).map(t=>t.id)];
     tasks=tasks.filter(t=>!toDelete.includes(t.id));
+    tasks.forEach(t=>{if(toDelete.includes(t.dependsOn)) t.dependsOn=null;});
     saveLocal();scheduleSave();closeSidePanel();renderAll();
   });
 }
 
 function openNewTask(){
-  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:todayStr(),plannedTime:0};
+  pushUndo();
+  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:todayStr(),plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   tasks.unshift(newTask);
   syncTaskToGcal(newTask);
   saveLocal();scheduleSave();renderAll();
