@@ -1,3 +1,4 @@
+syntax OK
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -98,7 +99,13 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .task-list-filter{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
 .tl-filter-btn{font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-family:inherit;color:var(--text2);transition:all .15s;white-space:nowrap}
 .tl-filter-btn.active{border-width:2px;font-weight:600;color:var(--text)}
-.task-list-items{display:flex;flex-direction:column;gap:3px;max-height:calc(100vh - 220px);overflow-y:auto}
+.task-list-items{display:flex;flex-direction:column;gap:3px;max-height:calc(100vh - 220px);overflow-y:auto;position:relative}
+.task-link-layer{position:absolute;inset:0;z-index:4;overflow:visible;pointer-events:none}
+.task-link-path{fill:none;stroke:var(--blue);stroke-width:2;opacity:.65;pointer-events:stroke;cursor:pointer}
+.task-link-path:hover{stroke:var(--red);stroke-width:4;opacity:1}
+.task-link-handle{width:12px;height:12px;border:2px solid var(--blue);background:var(--card);border-radius:50%;padding:0;flex:0 0 12px;cursor:crosshair;position:relative;z-index:6}
+.task-link-handle.input{border-color:var(--border2)}
+.task-link-handle:hover,.task-link-handle.drag-target{background:var(--blue);transform:scale(1.25)}
 .task-project-group{border:1px solid var(--border);border-radius:10px;overflow:hidden;margin-bottom:9px;background:#fff}
 .task-project-head{padding:11px 12px 9px;background:var(--bg);cursor:pointer}
 .task-project-title{display:flex;align-items:center;gap:7px;font-size:13px;font-weight:700}
@@ -117,7 +124,6 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .task-list-item.drag-before{border-top:2px solid var(--blue);border-radius:0}
 .task-list-item.drag-after{border-bottom:2px solid var(--blue);border-radius:0}
 .task-list-item.unassigned{border-left:2px solid var(--amber)}
-.task-dependency{font-size:10px;color:var(--blue);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .proj-tree-panel{position:sticky;top:10px}
 .proj-tree-item{border-radius:var(--r2);margin-bottom:4px;overflow:visible}
 .proj-tree-head{display:flex;align-items:center;gap:8px;padding:10px 12px;border-radius:var(--r2);border:1px solid var(--border);background:var(--card);cursor:pointer;transition:all .15s;user-select:none}
@@ -515,10 +521,10 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
       <div class="task-list-panel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
           <div class="sec-title" style="margin:0">작업 목록</div>
-          <span style="font-size:12px;color:var(--text3)" id="task-list-count"></span>
+          <div style="display:flex;gap:10px;align-items:center"><span style="font-size:10px;color:var(--blue)">오른쪽 점 → 왼쪽 점으로 연결</span><span style="font-size:12px;color:var(--text3)" id="task-list-count"></span></div>
         </div>
         <div class="task-list-filter" id="task-list-filter"></div>
-        <div class="task-list-items" id="task-list-items"></div>
+        <div class="task-list-items" id="task-list-items" onscroll="renderDependencyLines()"></div>
       </div>
       <!-- Right: Project tree -->
       <div class="proj-tree-panel">
@@ -646,7 +652,6 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     </div>
     <div class="sp-row">
       <div class="sp-field"><div class="sp-label">시작 시간</div><select class="sp-select" id="sp-starthour" onchange="autoSavePanel()"><option value="">미정</option><option value="0">오전 12시</option><option value="1">오전 1시</option><option value="2">오전 2시</option><option value="3">오전 3시</option><option value="4">오전 4시</option><option value="5">오전 5시</option><option value="6">오전 6시</option><option value="7">오전 7시</option><option value="8">오전 8시</option><option value="9">오전 9시</option><option value="10">오전 10시</option><option value="11">오전 11시</option><option value="12">오후 12시</option><option value="13">오후 1시</option><option value="14">오후 2시</option><option value="15">오후 3시</option><option value="16">오후 4시</option><option value="17">오후 5시</option><option value="18">오후 6시</option><option value="19">오후 7시</option><option value="20">오후 8시</option><option value="21">오후 9시</option><option value="22">오후 10시</option><option value="23">오후 11시</option></select></div>
-      <div class="sp-field"><div class="sp-label">선행 작업</div><select class="sp-select" id="sp-dependency" onchange="autoSavePanel()"><option value="">없음</option></select></div>
     </div>
     <div class="sp-field"><div class="sp-label">메모</div><textarea class="sp-memo" id="sp-memo" placeholder="메모..." onblur="autoSavePanel()"></textarea></div>
     <div class="sp-divider"></div>
@@ -1318,16 +1323,16 @@ function renderTaskListPanel(){
       const isUnassigned=!t.projId||!projects.find(pr=>pr.id===t.projId);
       const directProject=projects.find(p=>p.id===t.projId);
       const phase=directProject&&gp&&directProject.id!==gp.id?directProject.name:'';
-      const dependency=tasks.find(x=>x.id===t.dependsOn);
       const prog=calcProgress(t.id);
       return`<div class="task-list-item${isUnassigned?' unassigned':''}" data-id="${t.id}" draggable="true" ondragstart="onTaskListDragStart(event,${t.id})" ondragover="onTaskListDragOver(event,${t.id})" ondragleave="onTaskListDragLeave(event)" ondrop="onTaskListDrop(event,${t.id})">
+        <button class="task-link-handle input" aria-label="${esc(t.name)}에 연결" ondragover="dependencyDragOver(event)" ondragleave="dependencyDragLeave(event)" ondrop="dropDependency(event,${t.id})" onclick="event.stopPropagation()"></button>
         <div class="chk ${isDone?'done':''}" onclick="event.stopPropagation();quickToggle(${t.id},event)" style="width:15px;height:15px;font-size:9px;flex-shrink:0">✓</div>
         <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${esc(t.name)}</span>
         ${phase?`<span class="task-phase-name" title="${esc(phase)}">${esc(phase)}</span>`:''}
-        ${dependency?`<span class="task-dependency" title="선행 작업: ${esc(dependency.name)}">↳ ${esc(dependency.name)}</span>`:''}
         ${prog?`<span style="font-size:10px;color:var(--text3)">${prog.done}/${prog.total}</span>`:''}
         <span class="task-status-pill ${t.status}">${COLS[t.status]||'할 일'}</span>
         ${t.due?`<span style="font-size:11px;color:var(--text3);flex-shrink:0">${fmtDate(t.due)}</span>`:''}
+        <button class="task-link-handle output" draggable="true" aria-label="${esc(t.name)}에서 연결 시작" ondragstart="startDependencyDrag(event,${t.id})" ondragend="window._dependencySource=null" onclick="event.stopPropagation()"></button>
       </div>`;
     }).join('');
     return`<section class="task-project-group">
@@ -1338,6 +1343,7 @@ function renderTaskListPanel(){
       <div class="task-project-body">${rows}</div>
     </section>`;
   }).join('');
+  requestAnimationFrame(renderDependencyLines);
 }
 
 function setTaskListFilter(filter){
@@ -1391,6 +1397,76 @@ function dropTaskIntoProject(e,projId){
   pushUndo(); t.projId=projId; t.order=nextTaskOrder(projId);
   saveLocal();scheduleSave();renderAll();
   showToast('프로젝트로 이동했어요');
+}
+
+function startDependencyDrag(e,sourceId){
+  e.stopPropagation();
+  window._dependencySource=sourceId;
+  e.dataTransfer.setData('dependency-source',String(sourceId));
+  e.dataTransfer.effectAllowed='link';
+}
+
+function dependencyDragOver(e){
+  if(!window._dependencySource&&!e.dataTransfer.types.includes('dependency-source')) return;
+  e.preventDefault(); e.stopPropagation();
+  e.currentTarget.classList.add('drag-target');
+  e.dataTransfer.dropEffect='link';
+}
+function dependencyDragLeave(e){ e.currentTarget.classList.remove('drag-target'); }
+
+function dropDependency(e,targetId){
+  e.preventDefault(); e.stopPropagation();
+  e.currentTarget.classList.remove('drag-target');
+  const sourceId=window._dependencySource||parseInt(e.dataTransfer.getData('dependency-source'));
+  window._dependencySource=null;
+  if(!sourceId||sourceId===targetId){showToast('같은 작업끼리는 연결할 수 없어요');return;}
+  if(dependencyWouldCycle(targetId,sourceId)){showToast('순환 연결은 만들 수 없어요');return;}
+  const target=tasks.find(t=>t.id===targetId); if(!target)return;
+  pushUndo(); target.dependsOn=sourceId;
+  saveLocal();scheduleSave();renderAll();
+  showToast('작업을 연결했어요');
+}
+
+function removeDependency(targetId){
+  const target=tasks.find(t=>t.id===targetId); if(!target||!target.dependsOn)return;
+  pushUndo(); target.dependsOn=null;
+  saveLocal();scheduleSave();renderAll();
+  showToast('연결을 삭제했어요');
+}
+
+function renderDependencyLines(){
+  const container=document.getElementById('task-list-items'); if(!container)return;
+  container.querySelector('.task-link-layer')?.remove();
+  const visibleIds=new Set([...container.querySelectorAll('.task-list-item')].map(el=>parseInt(el.dataset.id)));
+  const links=tasks.filter(t=>t.dependsOn&&visibleIds.has(t.id)&&visibleIds.has(t.dependsOn));
+  if(!links.length)return;
+  const ns='http://www.w3.org/2000/svg';
+  const svg=document.createElementNS(ns,'svg');
+  svg.classList.add('task-link-layer');
+  svg.setAttribute('width',container.scrollWidth);svg.setAttribute('height',container.scrollHeight);
+  const defs=document.createElementNS(ns,'defs');
+  defs.innerHTML='<marker id="task-arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto"><path d="M0,0 L8,4 L0,8 Z" fill="var(--blue)"></path></marker>';
+  svg.appendChild(defs);
+  const base=container.getBoundingClientRect();
+  links.forEach(target=>{
+    const sourceRow=container.querySelector(`.task-list-item[data-id="${target.dependsOn}"]`);
+    const targetRow=container.querySelector(`.task-list-item[data-id="${target.id}"]`);
+    const source=sourceRow?.querySelector('.task-link-handle.output')?.getBoundingClientRect();
+    const dest=targetRow?.querySelector('.task-link-handle.input')?.getBoundingClientRect();
+    if(!source||!dest)return;
+    const x1=source.left+source.width/2-base.left+container.scrollLeft;
+    const y1=source.top+source.height/2-base.top+container.scrollTop;
+    const x2=dest.left+dest.width/2-base.left+container.scrollLeft;
+    const y2=dest.top+dest.height/2-base.top+container.scrollTop;
+    const bend=Math.max(28,Math.abs(x2-x1)*.45);
+    const path=document.createElementNS(ns,'path');
+    path.setAttribute('d',`M ${x1} ${y1} C ${x1+bend} ${y1}, ${x2-bend} ${y2}, ${x2} ${y2}`);
+    path.setAttribute('marker-end','url(#task-arrow)');path.classList.add('task-link-path');
+    path.setAttribute('aria-label','작업 연결. 클릭하여 삭제');
+    path.addEventListener('click',e=>{e.stopPropagation();removeDependency(target.id);});
+    svg.appendChild(path);
+  });
+  container.appendChild(svg);
 }
 
 function onTaskListDragStart(e, id){
@@ -3095,9 +3171,6 @@ function openPanel(id){
   // populate project select
   const sel=document.getElementById('sp-proj');
   sel.innerHTML=projects.map(p=>`<option value="${p.id}">${esc(p.icon)} ${esc(p.name)}</option>`).join('');
-  const depSel=document.getElementById('sp-dependency');
-  const dependencyOptions=tasks.filter(x=>x.id!==id&&!dependencyWouldCycle(id,x.id)).sort((a,b)=>a.name.localeCompare(b.name,'ko'));
-  depSel.innerHTML='<option value="">없음</option>'+dependencyOptions.map(x=>`<option value="${x.id}">${esc(getProjDisplay(x.projId).name)} · ${esc(x.name)}</option>`).join('');
 
   document.getElementById('sp-title').value=t.name;
   sel.value=t.projId;
@@ -3107,7 +3180,6 @@ function openPanel(id){
   document.getElementById('sp-due').value=t.due||'';
   document.getElementById('sp-time').value=t.plannedTime||0;
   document.getElementById('sp-starthour').value=t.startHour??'';
-  depSel.value=t.dependsOn||'';
   document.getElementById('sp-memo').value=t.memo||'';
   document.getElementById('sp-btn-del').style.visibility='visible';
 
@@ -3163,8 +3235,6 @@ function savePanel(silent=false){
   t.plannedTime=parseInt(document.getElementById('sp-time').value)||0;
   const sh=document.getElementById('sp-starthour').value;
   t.startHour=sh===''?undefined:parseInt(sh);
-  const dependencyValue=document.getElementById('sp-dependency').value;
-  t.dependsOn=dependencyValue?parseInt(dependencyValue):null;
   t.memo=document.getElementById('sp-memo').value;
   saveLocal();scheduleSave();syncTaskToGcal(t);
   if(!silent){showToast('저장됐어요');renderAll();}else{renderAll();}
@@ -3388,6 +3458,7 @@ function deleteProject(){
 
 
 // ── Init ──────────────────────────────────────────────────
+window.addEventListener('resize',()=>requestAnimationFrame(renderDependencyLines));
 loadLocal();renderAll();startNotionAutoSync();
 dailyDate=new Date();
 document.getElementById('proj-filter').style.display='flex';
