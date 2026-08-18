@@ -662,6 +662,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     </div>
     <div class="sp-row">
       <div class="sp-field"><div class="sp-label">마감일</div><input class="sp-date" id="sp-due" type="date" onchange="autoSavePanel()"></div>
+      <div class="sp-field"><div class="sp-label">계획 주</div><input class="sp-date" id="sp-planned-week" type="date" onchange="autoSavePanel()"></div>
+    </div>
+    <div class="sp-row">
       <div class="sp-field"><div class="sp-label">계획 시간(분)</div><input class="sp-date" id="sp-time" type="number" min="0" style="width:80px" onchange="autoSavePanel()"></div>
     </div>
     <div class="sp-row">
@@ -819,11 +822,12 @@ function mergeNotionData(payload){
       local.name=remote.name;
       local.status=remote.status;
       local.due=remote.due||'';
+      local.plannedWeek=remote.plannedWeek||'';
       local.projId=remoteProjId;
       local.notionId=remote.notionId;
       local.notionUrl=remote.notionUrl;
     }else{
-      tasks.push({id:nextTaskId++,name:remote.name,parentId:null,projId:remoteProjId,memo:'',status:remote.status,tag:'STUDIO',priority:'mid',due:remote.due||'',plannedTime:0,order:nextTaskOrder(remoteProjId),notionId:remote.notionId,notionUrl:remote.notionUrl});
+      tasks.push({id:nextTaskId++,name:remote.name,parentId:null,projId:remoteProjId,memo:'',status:remote.status,tag:'STUDIO',priority:'mid',due:remote.due||'',plannedWeek:remote.plannedWeek||'',plannedTime:0,order:nextTaskOrder(remoteProjId),notionId:remote.notionId,notionUrl:remote.notionUrl});
     }
   });
 
@@ -2500,8 +2504,9 @@ function renderWeekly(){
   // Weekly todo: all tasks this week
   const weekStrs=dates.map(d=>dailyDateStr(d));
   const weekStart=weekStrs[0];
-  const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||t.status==='doing');
-  const dueWeekTasks=tasks.filter(t=>weekStrs.includes(t.due));
+  const isPlannedThisWeek=t=>t.plannedWeek===weekStart||weekStrs.includes(t.plannedWeek);
+  const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||isPlannedThisWeek(t)||t.status==='doing');
+  const dueWeekTasks=tasks.filter(t=>weekStrs.includes(t.due)||isPlannedThisWeek(t));
   const progressEl=document.getElementById('weekly-progress');
   if(progressEl){
     const projectGroups=[];
@@ -2520,7 +2525,7 @@ function renderWeekly(){
         <div class="weekly-progress-head"><span>${esc(disp.icon)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(disp.name)}</span><span style="color:var(--text3)">${done}/${group.tasks.length} · ${pct}%</span></div>
         <div class="weekly-progress-track"><div class="weekly-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div>
       </div>`;
-    }).join('')||(dueWeekTasks.length===0?'<div style="font-size:11px;color:var(--text3);padding:4px 0">이번 주 마감 작업 없음</div>':'');
+    }).join('')||(dueWeekTasks.length===0?'<div style="font-size:11px;color:var(--text3);padding:4px 0">이번 주 계획 작업 없음</div>':'');
   }
 
   // 이월된 미완료: 이번 주 시작일 이전이고 미완료인 작업
@@ -2528,8 +2533,10 @@ function renderWeekly(){
     if(t.status==='done') return false;
     if(weekTasks.includes(t)) return false;
     if(t.due && t.due < weekStart) return true;
+    if(t.plannedWeek && t.plannedWeek < weekStart) return true;
     return false;
   });
+  const unscheduledTasks=tasks.filter(t=>t.status!=='done'&&!t.due&&!t.plannedWeek&&!weekTasks.includes(t));
 
   const wList=document.getElementById('weekly-todo-list');
 
@@ -2559,7 +2566,13 @@ function renderWeekly(){
       ${remainingTasks.map(t=>makeWeeklyTodoItem(t,'remaining')).join('')}
     </div>`:'';
 
-  wList.innerHTML=(weekTasks.length===0?'<div style="font-size:12px;color:var(--text3);padding:4px 0">이번 주 작업 없음</div>':weekHtml)+remainHtml;
+  const unscheduledHtml=unscheduledTasks.length>0?`
+    <div class="remaining-section">
+      <div class="remaining-header">날짜 미정 (${unscheduledTasks.length})</div>
+      ${unscheduledTasks.map(t=>makeWeeklyTodoItem(t)).join('')}
+    </div>`:'';
+
+  wList.innerHTML=(weekTasks.length===0?'<div style="font-size:12px;color:var(--text3);padding:4px 0">이번 주 작업 없음</div>':weekHtml)+remainHtml+unscheduledHtml;
   wList.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
 
   // ── Weekly timeline: absolute positioning (same as daily) ──
@@ -3288,6 +3301,7 @@ function openPanel(id){
   document.getElementById('sp-tag').value=t.tag;
   document.getElementById('sp-priority').value=t.priority;
   document.getElementById('sp-due').value=t.due||'';
+  document.getElementById('sp-planned-week').value=t.plannedWeek||'';
   document.getElementById('sp-time').value=t.plannedTime||0;
   document.getElementById('sp-starthour').value=t.startHour??'';
   document.getElementById('sp-memo').value=t.memo||'';
@@ -3342,6 +3356,7 @@ function savePanel(silent=false){
   t.tag=document.getElementById('sp-tag').value;
   t.priority=document.getElementById('sp-priority').value;
   t.due=document.getElementById('sp-due').value;
+  t.plannedWeek=document.getElementById('sp-planned-week').value;
   t.plannedTime=parseInt(document.getElementById('sp-time').value)||0;
   const sh=document.getElementById('sp-starthour').value;
   t.startHour=sh===''?undefined:parseInt(sh);
