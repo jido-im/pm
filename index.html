@@ -92,9 +92,25 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 
 /* ── Tree List ── */
 .tree-wrap{display:flex;flex-direction:column;gap:1px}
-.list-split{display:grid;grid-template-columns:1fr 300px;gap:14px;align-items:start}
+.list-split{display:grid;grid-template-columns:270px minmax(0,1fr);gap:14px;align-items:start}
 @media(max-width:780px){.list-split{grid-template-columns:1fr}}
-.task-list-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px}
+.task-list-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;position:sticky;top:10px;max-height:calc(100vh - 160px);overflow:auto}
+.unassigned-hint{font-size:11px;line-height:1.45;color:var(--text3);margin-bottom:10px}
+.unassigned-task-list{display:flex;flex-direction:column;gap:4px}
+.unassigned-task-list .task-link-handle,.unassigned-task-list .task-status-pill{display:none}
+.unassigned-task-list .task-list-item{padding:8px 7px;background:#fffaf0;border:1px solid #f3dfb3}
+.project-workspace-panel{min-width:0}
+.project-workspace-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:12px}
+.project-workspace{position:relative;display:flex;flex-direction:column;gap:16px;min-height:200px}
+.master-section{border:1px solid var(--border);border-radius:16px;background:var(--card);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.035)}
+.master-section-head{padding:17px 18px 14px;background:linear-gradient(135deg,#f8f7f3,#f1f5f8);cursor:pointer}
+.master-section-head.drop-hover{background:#eaf3fb;box-shadow:inset 0 0 0 2px var(--blue)}
+.master-section-title{display:flex;align-items:center;gap:10px;font-size:17px;font-weight:800}
+.master-section-actions{display:flex;align-items:center;gap:7px;margin-left:auto}
+.master-section-body{padding:8px 10px 12px}
+.master-section .explorer-folder{margin:8px 3px;border-radius:11px}
+.master-section .explorer-folder-head{padding:11px 12px}
+.master-section .task-list-item{padding:9px 10px}
 .task-list-filter{display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px}
 .tl-filter-btn{font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-family:inherit;color:var(--text2);transition:all .15s;white-space:nowrap}
 .tl-filter-btn.active{border-width:2px;font-weight:600;color:var(--text)}
@@ -542,22 +558,24 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
   </div>
   <div id="view-list" class="view">
     <div class="list-split">
-      <!-- Left: Task list -->
+      <!-- Left: Unassigned inbox -->
       <div class="task-list-panel">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div class="sec-title" style="margin:0">작업 목록</div>
-          <div style="display:flex;gap:10px;align-items:center"><span style="font-size:10px;color:var(--blue)">오른쪽 점 → 왼쪽 점으로 연결</span><span style="font-size:12px;color:var(--text3)" id="task-list-count"></span></div>
+          <div class="sec-title" style="margin:0">⚠ 미분류</div>
+          <span style="font-size:12px;color:var(--amber)" id="task-list-count"></span>
         </div>
-        <div class="task-list-filter" id="task-list-filter"></div>
-        <div class="task-list-items" id="task-list-items" onscroll="renderDependencyLines()"></div>
+        <div class="unassigned-hint">프로젝트가 없는 작업만 모입니다.<br>오른쪽 프로젝트 안으로 드래그하세요.</div>
+        <div class="unassigned-task-list" id="unassigned-task-list"></div>
       </div>
-      <!-- Right: Project tree -->
-      <div class="proj-tree-panel">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div class="sec-title" style="margin:0">프로젝트</div>
+      <!-- Right: Master project workspace -->
+      <div class="project-workspace-panel">
+        <div class="project-workspace-head">
+          <div><div class="sec-title" style="margin:0 0 3px">프로젝트 작업공간</div><div style="font-size:11px;color:var(--text3)">대단원 안에서 태스크와 하위 프로젝트를 바로 정리하세요</div></div>
+          <div style="display:flex;align-items:center;gap:10px"><span style="font-size:10px;color:var(--blue)">오른쪽 점 → 왼쪽 점으로 연결</span>
           <button class="bsm pri" onclick="openProjModal(null)">+ 새 프로젝트</button>
+          </div>
         </div>
-        <div id="proj-tree-wrap"></div>
+        <div class="project-workspace" id="project-workspace"></div>
       </div>
     </div>
   </div>
@@ -1511,68 +1529,40 @@ function toggleProjCollapse(id){
 
 // ── Main entry for list tab ──
 function renderTree(){
-  renderTaskListPanel();
-  renderProjTreePanel();
+  renderUnassignedPanel();
+  renderProjectWorkspace();
 }
 
-// ── Left panel: flat task list with filters ──
-function renderTaskListPanel(){
-  const filterEl=document.getElementById('task-list-filter');
-  const itemsEl=document.getElementById('task-list-items');
+// ── Left panel: unassigned inbox only ──
+function renderUnassignedPanel(){
+  const itemsEl=document.getElementById('unassigned-task-list');
   const countEl=document.getElementById('task-list-count');
-  if(!filterEl||!itemsEl) return;
+  if(!itemsEl)return;
+  const unassigned=tasks.filter(t=>!t.projId||!projects.find(p=>p.id===t.projId));
+  if(countEl)countEl.textContent=unassigned.length+'개';
+  itemsEl.innerHTML=unassigned.length?renderExplorerTasks(unassigned):'<div style="font-size:12px;color:var(--text3);padding:18px 4px;text-align:center">모든 작업이 분류됐어요 ✓</div>';
+}
 
-  // Build filter chips
-  const unassignedCount=tasks.filter(t=>!t.projId||!projects.find(p=>p.id===t.projId)).length;
-  let filterHtml=`<button class="tl-filter-btn ${taskListFilter==='all'?'active':''}" onclick="setTaskListFilter('all')" style="${taskListFilter==='all'?'border-color:var(--text)':''}">전체</button>`;
-  filterHtml+=`<button class="tl-filter-btn ${taskListFilter==='unassigned'?'active':''}" onclick="setTaskListFilter('unassigned')" style="${taskListFilter==='unassigned'?'border-color:var(--amber);color:var(--amber)':'color:var(--amber)'}">⚠ 미분류 ${unassignedCount>0?'('+unassignedCount+')':''}</button>`;
-  sortProjects(projects.filter(p=>!p.parentId)).forEach(p=>{
-    const disp=getProjDisplay(p.id);
-    filterHtml+=`<button class="tl-filter-btn ${taskListFilter===p.id?'active':''}" onclick="setTaskListFilter(${p.id})" style="${taskListFilter===p.id?'border-color:'+disp.color+';color:'+disp.color:''}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${disp.color};margin-right:4px"></span>${esc(p.name)}</button>`;
-  });
-  filterEl.innerHTML=filterHtml;
-
-  // Filter tasks
-  let filteredT=tasks;
-  if(taskListFilter==='unassigned') filteredT=tasks.filter(t=>!t.projId||!projects.find(p=>p.id===t.projId));
-  else if(taskListFilter!=='all'){
-    const pid=taskListFilter;
-    const allProjIds=[pid,...projAllDescendantProjects(pid).map(p=>p.id)];
-    filteredT=tasks.filter(t=>allProjIds.includes(t.projId));
-  }
-
-  countEl.textContent=filteredT.length+'개';
-
-  const groups=[];
-  if(taskListFilter!=='unassigned'){
-    const visibleRoots=taskListFilter==='all'?sortProjects(projects.filter(p=>!p.parentId)):projects.filter(p=>p.id===taskListFilter);
-    visibleRoots.forEach(project=>groups.push({key:project.id,project,tasks:[]}));
-  }
-  filteredT.forEach(t=>{
-    const root=getRootProj(t.projId);
-    const key=root?.id||'unassigned';
-    let group=groups.find(g=>g.key===key);
-    if(!group){ group={key,project:root||null,tasks:[]}; groups.push(group); }
-    group.tasks.push(t);
-  });
-  groups.forEach(group=>group.tasks.sort((a,b)=>(a.order||0)-(b.order||0)||a.id-b.id));
-  groups.sort((a,b)=>a.key==='unassigned'?1:b.key==='unassigned'?-1:(a.project?.name||'').localeCompare(b.project?.name||'','ko'));
-
-  if(groups.length===0){itemsEl.innerHTML='<div style="font-size:12px;color:var(--text3);padding:12px 0;text-align:center">작업 없음</div>';return;}
-
-  itemsEl.innerHTML=groups.map(group=>{
-    const gp=group.project;
-    const disp=gp?getProjDisplay(gp.id):{name:'미분류',icon:'⚠',color:'var(--amber)'};
-    const doneCount=group.tasks.filter(t=>t.status==='done').length;
-    const pct=group.tasks.length?Math.round(doneCount/group.tasks.length*100):0;
-    const rootCollapsed=gp&&collapsedExplorerFolders.has(gp.id);
-    const rows=gp?renderExplorerProjectContents(gp,group.tasks):renderExplorerTasks(group.tasks);
-    return`<section class="task-project-group">
-      <div class="task-project-head" ${gp?`onclick="toggleExplorerFolder(${gp.id})" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${gp.id})"`:''}>
-        <div class="task-project-title"><span style="font-size:10px;color:var(--text3)">${gp?(rootCollapsed?'▶':'▼'):''}</span><span>${esc(disp.icon)}</span><span class="grow">${esc(disp.name)}</span>${gp?projectTypeBadge(gp):''}<span style="font-size:11px;color:var(--text3)">${group.tasks.length}개</span></div>
-        <div class="task-project-progress"><div class="task-project-progress-track"><div class="task-project-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div><span class="task-project-progress-text">${doneCount}/${group.tasks.length} 완료 · ${pct}%</span></div>
+function renderProjectWorkspace(){
+  const workspace=document.getElementById('project-workspace');
+  if(!workspace)return;
+  const roots=sortProjects(projects.filter(p=>!p.parentId));
+  if(!roots.length){workspace.innerHTML='<div style="font-size:13px;color:var(--text3);padding:30px;text-align:center;border:1px dashed var(--border2);border-radius:14px">프로젝트가 없어요</div>';return;}
+  workspace.innerHTML=roots.map(root=>{
+    const ids=[root.id,...projAllDescendantProjects(root.id).map(p=>p.id)];
+    const sectionTasks=tasks.filter(t=>ids.includes(t.projId));
+    const done=sectionTasks.filter(t=>t.status==='done').length;
+    const pct=sectionTasks.length?Math.round(done/sectionTasks.length*100):0;
+    const collapsed=collapsedExplorerFolders.has(root.id);
+    const disp=getProjDisplay(root.id);
+    return`<section class="master-section" data-project-id="${root.id}">
+      <div class="master-section-head" onclick="toggleExplorerFolder(${root.id})" ondblclick="event.stopPropagation();openProjModal(${root.id})" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${root.id})">
+        <div class="master-section-title"><span style="font-size:11px;color:var(--text3)">${collapsed?'▶':'▼'}</span><span style="font-size:22px">${esc(disp.icon)}</span><span style="color:${disp.color}">${esc(root.name)}</span>${projectTypeBadge(root)}
+          <div class="master-section-actions"><span style="font-size:11px;color:var(--text3)">${sectionTasks.length}개 · ${pct}%</span><button class="bsm" onclick="event.stopPropagation();openProjModal(null,${root.id})">+ 하위</button><button class="bsm" onclick="event.stopPropagation();openProjModal(${root.id})">편집</button></div>
+        </div>
+        <div class="task-project-progress"><div class="task-project-progress-track"><div class="task-project-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div><span class="task-project-progress-text">${done}/${sectionTasks.length} 완료</span></div>
       </div>
-      <div class="task-project-body" style="display:${rootCollapsed?'none':'block'}">${rows}</div>
+      <div class="master-section-body" style="display:${collapsed?'none':'block'}">${renderExplorerProjectContents(root,sectionTasks)}</div>
     </section>`;
   }).join('');
   requestAnimationFrame(renderDependencyLines);
@@ -1580,12 +1570,12 @@ function renderTaskListPanel(){
 
 function toggleExplorerFolder(id){
   collapsedExplorerFolders.has(id)?collapsedExplorerFolders.delete(id):collapsedExplorerFolders.add(id);
-  renderTaskListPanel();
+  renderProjectWorkspace();
 }
 function toggleExplorerTask(id,e){
   e?.stopPropagation();
   collapsedExplorerTasks.has(id)?collapsedExplorerTasks.delete(id):collapsedExplorerTasks.add(id);
-  renderTaskListPanel();
+  renderProjectWorkspace();renderUnassignedPanel();
 }
 function folderDragOver(e){e.preventDefault();e.stopPropagation();e.currentTarget.classList.add('drop-hover');}
 function folderDragLeave(e){e.currentTarget.classList.remove('drop-hover');}
@@ -1644,7 +1634,9 @@ function renderExplorerTask(t,list){
 
 function setTaskListFilter(filter){
   taskListFilter=filter;
-  renderTaskListPanel();
+  if(Number.isFinite(filter))collapsedExplorerFolders.delete(filter);
+  renderTree();
+  if(Number.isFinite(filter))setTimeout(()=>document.querySelector(`.master-section[data-project-id="${filter}"]`)?.scrollIntoView({behavior:'smooth',block:'start'}),30);
 }
 
 function nextTaskOrder(projId){
@@ -1740,7 +1732,7 @@ function removeDependency(targetId){
 }
 
 function renderDependencyLines(){
-  const container=document.getElementById('task-list-items'); if(!container)return;
+  const container=document.getElementById('project-workspace'); if(!container)return;
   container.querySelector('.task-link-layer')?.remove();
   const visibleIds=new Set([...container.querySelectorAll('.task-list-item')].map(el=>parseInt(el.dataset.id)));
   const links=tasks.filter(t=>t.dependsOn&&visibleIds.has(t.id)&&visibleIds.has(t.dependsOn));
