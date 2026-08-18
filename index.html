@@ -887,6 +887,16 @@ function scheduleNotionWrite(){
   notionWriteTimer=setTimeout(()=>flushNotionWrites(),900);
 }
 
+function hasPendingNotionChanges(){
+  if([...notionTaskBaseline].some(([id])=>!tasks.some(t=>t.id===id)))return true;
+  if([...notionProjectBaseline].some(([id])=>!projects.some(p=>p.id===id)))return true;
+  if(projects.some(p=>p.notionId&&notionProjectBaseline.get(p.id)?.fingerprint!==notionFingerprint(projectNotionData(p))))return true;
+  if(tasks.some(t=>t.notionId&&notionTaskBaseline.get(t.id)?.fingerprint!==notionFingerprint(taskNotionData(t))))return true;
+  if(projects.some(p=>!p.notionId&&!notionKnownProjectIds.has(p.id)))return true;
+  if(tasks.some(t=>!t.notionId&&!notionKnownTaskIds.has(t.id)))return true;
+  return false;
+}
+
 async function flushNotionWrites(){
   if(!notionReady||notionMerging||notionWriteInFlight)return;
   notionWriteInFlight=true;
@@ -1031,6 +1041,13 @@ function mergeNotionData(payload,{preservePmOnly=false}={}){
 }
 
 async function syncFromNotion({silent=false}={}){
+  if(notionReady&&hasPendingNotionChanges()){
+    await flushNotionWrites();
+    if(hasPendingNotionChanges()){
+      if(!silent)showToast('Notion 저장 실패를 먼저 해결해주세요');
+      return;
+    }
+  }
   let {url,token}=getNotionSyncConfig();
   if(!url){
     if(silent) return;
