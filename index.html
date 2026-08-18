@@ -1,4 +1,3 @@
-syntax OK
 <!DOCTYPE html>
 <html lang="ko">
 <head>
@@ -115,6 +114,14 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .task-project-progress-fill{height:100%;border-radius:4px;transition:width .25s}
 .task-project-progress-text{font-size:10px;color:var(--text3);min-width:64px;text-align:right}
 .task-project-body{padding:4px 6px 6px}
+.explorer-folder{margin:5px 4px;border:1px solid var(--border);border-radius:8px;background:var(--card);overflow:hidden}
+.explorer-folder-head{display:flex;align-items:center;gap:7px;padding:8px 10px;background:#f7f6f2;cursor:pointer;user-select:none}
+.explorer-folder-head:hover,.explorer-folder-head.drop-hover{background:#eaf3fb;border-color:var(--blue)}
+.explorer-folder-arrow{width:12px;font-size:9px;color:var(--text3)}
+.explorer-folder-name{flex:1;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.explorer-folder-progress{font-size:10px;color:var(--text3)}
+.explorer-folder-body{padding:4px 5px 6px}
+.explorer-task-children{margin-left:22px;border-left:1px solid var(--border);padding-left:5px}
 .task-status-pill{font-size:10px;padding:2px 6px;border-radius:8px;white-space:nowrap;background:#eee;color:var(--text2)}
 .task-status-pill.doing{background:#e6f1fb;color:#185fa5}.task-status-pill.review{background:#faeeda;color:#854f0b}.task-status-pill.done{background:#e1f5ee;color:#0f6e56}
 .task-phase-name{font-size:10px;color:var(--text3);white-space:nowrap;max-width:100px;overflow:hidden;text-overflow:ellipsis}
@@ -123,6 +130,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .task-list-item.dragging-item{opacity:.4}
 .task-list-item.drag-before{border-top:2px solid var(--blue);border-radius:0}
 .task-list-item.drag-after{border-bottom:2px solid var(--blue);border-radius:0}
+.task-list-item.drag-nest{border:2px solid var(--blue);background:#eaf3fb}
 .task-list-item.unassigned{border-left:2px solid var(--amber)}
 .proj-tree-panel{position:sticky;top:10px}
 .proj-tree-item{border-radius:var(--r2);margin-bottom:4px;overflow:visible}
@@ -307,6 +315,11 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-split{display:grid;grid-template-columns:200px 1fr;gap:14px;align-items:start}
 @media(max-width:700px){.weekly-split{grid-template-columns:1fr}}
 .weekly-todo-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;position:sticky;top:10px;max-height:calc(100vh - 160px);overflow-y:auto}
+.weekly-progress{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
+.weekly-progress-card{padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer}
+.weekly-progress-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700}
+.weekly-progress-track{height:4px;background:#e5e3de;border-radius:3px;margin-top:6px;overflow:hidden}
+.weekly-progress-fill{height:100%;border-radius:3px}
 .weekly-tl-panel{}
 .weekly-tl-wrap{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);overflow:auto;max-height:calc(100vh - 180px)}
 .weekly-grid{min-width:560px}
@@ -590,6 +603,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     <div class="weekly-split">
       <div class="weekly-todo-panel">
         <div class="sec-title" style="margin-bottom:10px">이번 주 작업</div>
+        <div class="weekly-progress" id="weekly-progress"></div>
         <div class="todo-input-wrap" style="margin-bottom:8px">
           <input class="todo-input" id="weekly-todo-input" placeholder="새 작업 후 엔터..." onkeyup="onWeeklyTodoEnter(event)" oncompositionend="window._composing=false" oncompositionstart="window._composing=true">
         </div>
@@ -1254,6 +1268,8 @@ function renderBoard(){
 
 // ── Tree List ─────────────────────────────────────────────
 let collapsedProjIds=new Set();
+let collapsedExplorerFolders=new Set();
+let collapsedExplorerTasks=new Set();
 let taskListFilter='all'; // 'all' | 'unassigned' | projId
 let _hoverExpandTimer=null;
 
@@ -1318,32 +1334,80 @@ function renderTaskListPanel(){
     const disp=gp?getProjDisplay(gp.id):{name:'미분류',icon:'⚠',color:'var(--amber)'};
     const doneCount=group.tasks.filter(t=>t.status==='done').length;
     const pct=group.tasks.length?Math.round(doneCount/group.tasks.length*100):0;
-    const rows=group.tasks.map(t=>{
-      const isDone=t.status==='done';
-      const isUnassigned=!t.projId||!projects.find(pr=>pr.id===t.projId);
-      const directProject=projects.find(p=>p.id===t.projId);
-      const phase=directProject&&gp&&directProject.id!==gp.id?directProject.name:'';
-      const prog=calcProgress(t.id);
-      return`<div class="task-list-item${isUnassigned?' unassigned':''}" data-id="${t.id}" draggable="true" ondragstart="onTaskListDragStart(event,${t.id})" ondragover="onTaskListDragOver(event,${t.id})" ondragleave="onTaskListDragLeave(event)" ondrop="onTaskListDrop(event,${t.id})">
-        <button class="task-link-handle input" aria-label="${esc(t.name)}에 연결" ondragover="dependencyDragOver(event)" ondragleave="dependencyDragLeave(event)" ondrop="dropDependency(event,${t.id})" onclick="event.stopPropagation()"></button>
-        <div class="chk ${isDone?'done':''}" onclick="event.stopPropagation();quickToggle(${t.id},event)" style="width:15px;height:15px;font-size:9px;flex-shrink:0">✓</div>
-        <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${esc(t.name)}</span>
-        ${phase?`<span class="task-phase-name" title="${esc(phase)}">${esc(phase)}</span>`:''}
-        ${prog?`<span style="font-size:10px;color:var(--text3)">${prog.done}/${prog.total}</span>`:''}
-        <span class="task-status-pill ${t.status}">${COLS[t.status]||'할 일'}</span>
-        ${t.due?`<span style="font-size:11px;color:var(--text3);flex-shrink:0">${fmtDate(t.due)}</span>`:''}
-        <button class="task-link-handle output" draggable="true" aria-label="${esc(t.name)}에서 연결 시작" ondragstart="startDependencyDrag(event,${t.id})" ondragend="window._dependencySource=null" onclick="event.stopPropagation()"></button>
-      </div>`;
-    }).join('');
+    const rootCollapsed=gp&&collapsedExplorerFolders.has(gp.id);
+    const rows=gp?renderExplorerProjectContents(gp,group.tasks):renderExplorerTasks(group.tasks);
     return`<section class="task-project-group">
-      <div class="task-project-head" ${gp?`onclick="setTaskListFilter(${gp.id})" ondragover="event.preventDefault()" ondrop="dropTaskIntoProject(event,${gp.id})"`:''}>
-        <div class="task-project-title"><span>${esc(disp.icon)}</span><span class="grow">${esc(disp.name)}</span><span style="font-size:11px;color:var(--text3)">${group.tasks.length}개</span></div>
+      <div class="task-project-head" ${gp?`onclick="toggleExplorerFolder(${gp.id})" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${gp.id})"`:''}>
+        <div class="task-project-title"><span style="font-size:10px;color:var(--text3)">${gp?(rootCollapsed?'▶':'▼'):''}</span><span>${esc(disp.icon)}</span><span class="grow">${esc(disp.name)}</span><span style="font-size:11px;color:var(--text3)">${group.tasks.length}개</span></div>
         <div class="task-project-progress"><div class="task-project-progress-track"><div class="task-project-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div><span class="task-project-progress-text">${doneCount}/${group.tasks.length} 완료 · ${pct}%</span></div>
       </div>
-      <div class="task-project-body">${rows}</div>
+      <div class="task-project-body" style="display:${rootCollapsed?'none':'block'}">${rows}</div>
     </section>`;
   }).join('');
   requestAnimationFrame(renderDependencyLines);
+}
+
+function toggleExplorerFolder(id){
+  collapsedExplorerFolders.has(id)?collapsedExplorerFolders.delete(id):collapsedExplorerFolders.add(id);
+  renderTaskListPanel();
+}
+function toggleExplorerTask(id,e){
+  e?.stopPropagation();
+  collapsedExplorerTasks.has(id)?collapsedExplorerTasks.delete(id):collapsedExplorerTasks.add(id);
+  renderTaskListPanel();
+}
+function folderDragOver(e){e.preventDefault();e.stopPropagation();e.currentTarget.classList.add('drop-hover');}
+function folderDragLeave(e){e.currentTarget.classList.remove('drop-hover');}
+
+function renderExplorerProjectContents(project,availableTasks){
+  const direct=availableTasks.filter(t=>t.projId===project.id);
+  const taskHtml=renderExplorerTasks(direct);
+  const folders=projChildProjects(project.id).map(child=>renderExplorerProjectFolder(child,availableTasks)).join('');
+  return taskHtml+folders||'<div style="font-size:11px;color:var(--text3);padding:8px">빈 폴더</div>';
+}
+
+function renderExplorerProjectFolder(project,availableTasks){
+  const ids=[project.id,...projAllDescendantProjects(project.id).map(p=>p.id)];
+  const folderTasks=availableTasks.filter(t=>ids.includes(t.projId));
+  const done=folderTasks.filter(t=>t.status==='done').length;
+  const pct=folderTasks.length?Math.round(done/folderTasks.length*100):0;
+  const collapsed=collapsedExplorerFolders.has(project.id);
+  const disp=getProjDisplay(project.id);
+  return`<div class="explorer-folder">
+    <div class="explorer-folder-head" onclick="toggleExplorerFolder(${project.id})" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${project.id})">
+      <span class="explorer-folder-arrow">${collapsed?'▶':'▼'}</span><span>${esc(disp.icon||'📁')}</span>
+      <span class="explorer-folder-name" style="color:${disp.color}">${esc(project.name)}</span>
+      <span class="explorer-folder-progress">${done}/${folderTasks.length} · ${pct}%</span>
+    </div>
+    <div class="explorer-folder-body" style="display:${collapsed?'none':'block'}">${renderExplorerProjectContents(project,availableTasks)}</div>
+  </div>`;
+}
+
+function renderExplorerTasks(list){
+  const ids=new Set(list.map(t=>t.id));
+  const roots=list.filter(t=>!t.parentId||!ids.has(t.parentId)).sort((a,b)=>(a.order||0)-(b.order||0)||a.id-b.id);
+  return roots.map(t=>renderExplorerTask(t,list)).join('');
+}
+
+function renderExplorerTask(t,list){
+  const isDone=t.status==='done';
+  const isUnassigned=!t.projId||!projects.find(pr=>pr.id===t.projId);
+  const children=list.filter(c=>c.parentId===t.id).sort((a,b)=>(a.order||0)-(b.order||0)||a.id-b.id);
+  const collapsed=collapsedExplorerTasks.has(t.id);
+  const prog=calcProgress(t.id);
+  return`<div class="explorer-task-wrap">
+    <div class="task-list-item${isUnassigned?' unassigned':''}" data-id="${t.id}" draggable="true" ondragstart="onTaskListDragStart(event,${t.id})" ondragover="onTaskListDragOver(event,${t.id})" ondragleave="onTaskListDragLeave(event)" ondrop="onTaskListDrop(event,${t.id})">
+      <button class="task-link-handle input" aria-label="${esc(t.name)}에 연결" ondragover="dependencyDragOver(event)" ondragleave="dependencyDragLeave(event)" ondrop="dropDependency(event,${t.id})" onclick="event.stopPropagation()"></button>
+      <span style="width:12px;font-size:9px;color:var(--text3);cursor:pointer" onclick="toggleExplorerTask(${t.id},event)">${children.length?(collapsed?'▶':'▼'):''}</span>
+      <div class="chk ${isDone?'done':''}" onclick="event.stopPropagation();quickToggle(${t.id},event)" style="width:15px;height:15px;font-size:9px;flex-shrink:0">✓</div>
+      <span class="tname ${isDone?'done':''}" onclick="openPanel(${t.id})" style="flex:1;font-size:13px;cursor:pointer">${esc(t.name)}</span>
+      ${prog?`<span style="font-size:10px;color:var(--text3)">${prog.done}/${prog.total}</span>`:''}
+      <span class="task-status-pill ${t.status}">${COLS[t.status]||'할 일'}</span>
+      ${t.due?`<span style="font-size:11px;color:var(--text3);flex-shrink:0">${fmtDate(t.due)}</span>`:''}
+      <button class="task-link-handle output" draggable="true" aria-label="${esc(t.name)}에서 연결 시작" ondragstart="startDependencyDrag(event,${t.id})" ondragend="window._dependencySource=null" onclick="event.stopPropagation()"></button>
+    </div>
+    ${children.length?`<div class="explorer-task-children" style="display:${collapsed?'none':'block'}">${children.map(c=>renderExplorerTask(c,list)).join('')}</div>`:''}
+  </div>`;
 }
 
 function setTaskListFilter(filter){
@@ -1359,9 +1423,10 @@ function nextTaskOrder(projId){
 function onTaskListDragOver(e,targetId){
   e.preventDefault(); e.stopPropagation();
   const row=e.currentTarget;
-  row.classList.remove('drag-before','drag-after');
+  row.classList.remove('drag-before','drag-after','drag-nest');
   const rect=row.getBoundingClientRect();
-  row.classList.add(e.clientY<rect.top+rect.height/2?'drag-before':'drag-after');
+  const ratio=(e.clientY-rect.top)/rect.height;
+  row.classList.add(ratio<.25?'drag-before':ratio>.75?'drag-after':'drag-nest');
   e.dataTransfer.dropEffect='move';
 }
 
@@ -1369,14 +1434,22 @@ function onTaskListDrop(e,targetId){
   e.preventDefault(); e.stopPropagation();
   const row=e.currentTarget;
   const after=row.classList.contains('drag-after');
-  row.classList.remove('drag-before','drag-after');
+  const nest=row.classList.contains('drag-nest');
+  row.classList.remove('drag-before','drag-after','drag-nest');
   const dragId=window._dragId||parseInt(e.dataTransfer.getData('taskId')||e.dataTransfer.getData('text/plain'));
   window._dragId=null;
   if(!dragId||dragId===targetId) return;
   const moving=tasks.find(t=>t.id===dragId), target=tasks.find(t=>t.id===targetId);
   if(!moving||!target) return;
+  if(nest&&allDescendants(moving.id).some(t=>t.id===target.id)){showToast('자신의 하위 작업 안으로 이동할 수 없어요');return;}
   pushUndo();
   moving.projId=target.projId;
+  if(nest){
+    moving.parentId=target.id;
+    moving.order=nextTaskOrder(target.projId);
+    saveLocal();scheduleSave();renderAll();showToast('하위 작업으로 이동했어요');return;
+  }
+  moving.parentId=target.parentId||null;
   const siblings=tasks.filter(t=>t.projId===target.projId&&t.id!==moving.id).sort((a,b)=>(a.order||0)-(b.order||0));
   const idx=siblings.findIndex(t=>t.id===target.id)+(after?1:0);
   siblings.splice(Math.max(0,idx),0,moving);
@@ -1386,7 +1459,7 @@ function onTaskListDrop(e,targetId){
 }
 
 function onTaskListDragLeave(e){
-  e.currentTarget.classList.remove('drag-before','drag-after');
+  e.currentTarget.classList.remove('drag-before','drag-after','drag-nest');
 }
 
 function dropTaskIntoProject(e,projId){
@@ -1394,7 +1467,7 @@ function dropTaskIntoProject(e,projId){
   const taskId=window._dragId||parseInt(e.dataTransfer.getData('taskId')||e.dataTransfer.getData('text/plain'));
   window._dragId=null;
   const t=tasks.find(x=>x.id===taskId); if(!t) return;
-  pushUndo(); t.projId=projId; t.order=nextTaskOrder(projId);
+  pushUndo(); t.projId=projId; t.parentId=null; t.order=nextTaskOrder(projId);
   saveLocal();scheduleSave();renderAll();
   showToast('프로젝트로 이동했어요');
 }
@@ -1543,6 +1616,7 @@ function renderProjTreeNode(p, depth, container){
     const t=tasks.find(t=>t.id===taskId); if(!t) return;
     pushUndo();
     t.projId=p.id;
+    t.parentId=null;
     t.order=nextTaskOrder(p.id);
     saveLocal();scheduleSave();renderAll();
     showToast(`"${p.name}"(으)로 이동했어요`);
@@ -2412,6 +2486,27 @@ function renderWeekly(){
   const weekStrs=dates.map(d=>dailyDateStr(d));
   const weekStart=weekStrs[0];
   const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||t.status==='doing');
+  const dueWeekTasks=tasks.filter(t=>weekStrs.includes(t.due));
+  const progressEl=document.getElementById('weekly-progress');
+  if(progressEl){
+    const projectGroups=[];
+    dueWeekTasks.forEach(t=>{
+      const root=getRootProj(t.projId);
+      const key=root?.id||0;
+      let group=projectGroups.find(g=>g.key===key);
+      if(!group){group={key,project:root,tasks:[]};projectGroups.push(group);}
+      group.tasks.push(t);
+    });
+    progressEl.innerHTML=projectGroups.map(group=>{
+      const disp=group.project?getProjDisplay(group.project.id):{name:'미분류',icon:'⚠',color:'var(--amber)'};
+      const done=group.tasks.filter(t=>t.status==='done').length;
+      const pct=group.tasks.length?Math.round(done/group.tasks.length*100):0;
+      return`<div class="weekly-progress-card" ${group.project?`onclick="switchTab('list');setTaskListFilter(${group.project.id})"`:''}>
+        <div class="weekly-progress-head"><span>${esc(disp.icon)}</span><span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${esc(disp.name)}</span><span style="color:var(--text3)">${done}/${group.tasks.length} · ${pct}%</span></div>
+        <div class="weekly-progress-track"><div class="weekly-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div>
+      </div>`;
+    }).join('')||(dueWeekTasks.length===0?'<div style="font-size:11px;color:var(--text3);padding:4px 0">이번 주 마감 작업 없음</div>':'');
+  }
 
   // 이월된 미완료: 이번 주 시작일 이전이고 미완료인 작업
   const remainingTasks=tasks.filter(t=>{
