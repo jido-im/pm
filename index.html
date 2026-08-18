@@ -142,6 +142,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .proj-tree-icon{font-size:16px;flex-shrink:0}
 .proj-tree-name{flex:1;font-size:13px;font-weight:600;color:var(--text)}
 .proj-tree-count{font-size:11px;color:var(--text3);flex-shrink:0}
+.proj-type-badge{font-size:9px;font-weight:700;line-height:1;padding:3px 5px;border-radius:999px;letter-spacing:.02em;flex-shrink:0}
+.proj-type-badge.category{background:#f0ede8;color:#716b63}
+.proj-type-badge.project{background:#e6f1fb;color:#2f78b7}
 .proj-tree-add{font-size:11px;padding:3px 7px;border:1px solid var(--border2);border-radius:5px;background:none;cursor:pointer;color:var(--text3);font-family:inherit}
 .proj-tree-add:hover{background:var(--bg)}
 .tree-node{}
@@ -804,11 +807,22 @@ function mergeNotionData(payload){
       local.notionId=remote.notionId;
       local.notionUrl=remote.notionUrl;
       local.notionStage=remote.stage||'';
+      local.notionType=remote.type||'';
     }else{
-      local={id:nextProjId++,name:remote.name,icon:ICONS[index%ICONS.length],color:COLORS[index%COLORS.length],desc:'',parentId:null,notionId:remote.notionId,notionUrl:remote.notionUrl,notionStage:remote.stage||''};
+      local={id:nextProjId++,name:remote.name,icon:remote.type==='Category'?'📁':ICONS[index%ICONS.length],color:COLORS[index%COLORS.length],desc:'',parentId:null,notionId:remote.notionId,notionUrl:remote.notionUrl,notionStage:remote.stage||'',notionType:remote.type||''};
       projects.push(local);
     }
     projectIds.set(notionId,local.id);
+  });
+
+  // Notion is the directory source of truth. Resolve hierarchy only after every
+  // project has a local id, so query order cannot break parent relationships.
+  incomingProjects.forEach(remote=>{
+    const localId=projectIds.get(normalizeNotionId(remote.notionId));
+    const local=projects.find(p=>p.id===localId);
+    if(!local)return;
+    const parentId=projectIds.get(normalizeNotionId(remote.notionParentId))||null;
+    local.parentId=parentId!==local.id?parentId:null;
   });
 
   incomingTasks.forEach(remote=>{
@@ -1314,7 +1328,7 @@ function renderTaskListPanel(){
   const unassignedCount=tasks.filter(t=>!t.projId||!projects.find(p=>p.id===t.projId)).length;
   let filterHtml=`<button class="tl-filter-btn ${taskListFilter==='all'?'active':''}" onclick="setTaskListFilter('all')" style="${taskListFilter==='all'?'border-color:var(--text)':''}">전체</button>`;
   filterHtml+=`<button class="tl-filter-btn ${taskListFilter==='unassigned'?'active':''}" onclick="setTaskListFilter('unassigned')" style="${taskListFilter==='unassigned'?'border-color:var(--amber);color:var(--amber)':'color:var(--amber)'}">⚠ 미분류 ${unassignedCount>0?'('+unassignedCount+')':''}</button>`;
-  projects.filter(p=>!p.parentId).forEach(p=>{
+  sortProjects(projects.filter(p=>!p.parentId)).forEach(p=>{
     const disp=getProjDisplay(p.id);
     filterHtml+=`<button class="tl-filter-btn ${taskListFilter===p.id?'active':''}" onclick="setTaskListFilter(${p.id})" style="${taskListFilter===p.id?'border-color:'+disp.color+';color:'+disp.color:''}"><span style="display:inline-block;width:7px;height:7px;border-radius:50%;background:${disp.color};margin-right:4px"></span>${esc(p.name)}</button>`;
   });
@@ -1333,7 +1347,7 @@ function renderTaskListPanel(){
 
   const groups=[];
   if(taskListFilter!=='unassigned'){
-    const visibleRoots=taskListFilter==='all'?projects.filter(p=>!p.parentId):projects.filter(p=>p.id===taskListFilter);
+    const visibleRoots=taskListFilter==='all'?sortProjects(projects.filter(p=>!p.parentId)):projects.filter(p=>p.id===taskListFilter);
     visibleRoots.forEach(project=>groups.push({key:project.id,project,tasks:[]}));
   }
   filteredT.forEach(t=>{
@@ -1357,7 +1371,7 @@ function renderTaskListPanel(){
     const rows=gp?renderExplorerProjectContents(gp,group.tasks):renderExplorerTasks(group.tasks);
     return`<section class="task-project-group">
       <div class="task-project-head" ${gp?`onclick="toggleExplorerFolder(${gp.id})" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${gp.id})"`:''}>
-        <div class="task-project-title"><span style="font-size:10px;color:var(--text3)">${gp?(rootCollapsed?'▶':'▼'):''}</span><span>${esc(disp.icon)}</span><span class="grow">${esc(disp.name)}</span><span style="font-size:11px;color:var(--text3)">${group.tasks.length}개</span></div>
+        <div class="task-project-title"><span style="font-size:10px;color:var(--text3)">${gp?(rootCollapsed?'▶':'▼'):''}</span><span>${esc(disp.icon)}</span><span class="grow">${esc(disp.name)}</span>${gp?projectTypeBadge(gp):''}<span style="font-size:11px;color:var(--text3)">${group.tasks.length}개</span></div>
         <div class="task-project-progress"><div class="task-project-progress-track"><div class="task-project-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div><span class="task-project-progress-text">${doneCount}/${group.tasks.length} 완료 · ${pct}%</span></div>
       </div>
       <div class="task-project-body" style="display:${rootCollapsed?'none':'block'}">${rows}</div>
@@ -1396,6 +1410,7 @@ function renderExplorerProjectFolder(project,availableTasks){
     <div class="explorer-folder-head" onclick="toggleExplorerFolder(${project.id})" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${project.id})">
       <span class="explorer-folder-arrow">${collapsed?'▶':'▼'}</span><span>${esc(disp.icon||'📁')}</span>
       <span class="explorer-folder-name" style="color:${disp.color}">${esc(project.name)}</span>
+      ${projectTypeBadge(project)}
       <span class="explorer-folder-progress">${done}/${folderTasks.length} · ${pct}%</span>
     </div>
     <div class="explorer-folder-body" style="display:${collapsed?'none':'block'}">${renderExplorerProjectContents(project,availableTasks)}</div>
@@ -1577,7 +1592,7 @@ function renderProjTreePanel(){
   const wrap=document.getElementById('proj-tree-wrap');
   if(!wrap) return;
   wrap.innerHTML='';
-  const tops=projects.filter(p=>!p.parentId);
+  const tops=sortProjects(projects.filter(p=>!p.parentId));
   if(tops.length===0){
     wrap.innerHTML='<div style="font-size:12px;color:var(--text3);padding:10px 0">프로젝트가 없어요</div>';
     return;
@@ -1586,7 +1601,7 @@ function renderProjTreePanel(){
 }
 
 function renderProjTreeNode(p, depth, container){
-  const childProjs=projChildProjects(p.id);
+  const childProjs=sortProjects(projChildProjects(p.id));
   const allProjIds=[p.id,...projAllDescendantProjects(p.id).map(c=>c.id)];
   const taskCount=tasks.filter(t=>allProjIds.includes(t.projId)).length;
   const isCollapsed=collapsedProjIds.has(p.id);
@@ -1602,6 +1617,7 @@ function renderProjTreeNode(p, depth, container){
     <span class="proj-tree-toggle">${hasChildren?(isCollapsed?'▶':'▼'):''}</span>
     <span class="proj-tree-icon">${disp.icon}</span>
     <span class="proj-tree-name" style="color:${disp.color}">${esc(p.name)}</span>
+    ${projectTypeBadge(p)}
     <span class="proj-tree-count">${taskCount}개</span>
     <button class="proj-tree-add" onclick="event.stopPropagation();openProjModal(null,${p.id})">+ 페이즈</button>
   `;
@@ -3473,7 +3489,15 @@ function getProjDisplay(id){
   const root=getRootProj(id);
   return { ...p, icon:root?.icon||'📁', color:root?.color||'#ccc' };
 }
-function projChildProjects(parentId){ return projects.filter(p=>p.parentId===parentId); }
+function projectSort(a,b){return String(a.name||'').localeCompare(String(b.name||''),'ko',{numeric:true,sensitivity:'base'});}
+function sortProjects(list){return [...list].sort(projectSort);}
+function projectTypeBadge(p){
+  if(!p?.notionType)return'';
+  const cls=p.notionType==='Category'?'category':'project';
+  const label=p.notionType==='Category'?'분류':'프로젝트';
+  return`<span class="proj-type-badge ${cls}">${label}</span>`;
+}
+function projChildProjects(parentId){ return sortProjects(projects.filter(p=>p.parentId===parentId)); }
 function projAllDescendantProjects(id){
   let res=[];
   projChildProjects(id).forEach(c=>{ res.push(c); res=res.concat(projAllDescendantProjects(c.id)); });
