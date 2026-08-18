@@ -516,6 +516,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     <div class="logo"><span class="logo-jido">jido.<em style="color:var(--blue);font-style:normal">pm</em></span></div>
     <div class="sync-bar">
       <div class="sync-pill"><span class="dot" id="sync-dot"></span><span id="sync-text">로그인 필요</span></div>
+      <div class="sync-pill"><span class="dot" id="notion-write-dot"></span><span id="notion-write-text">Notion 읽기 전용</span></div>
       <button class="bsm" id="btn-notion-sync" onclick="syncFromNotion()" title="Notion Projects와 Tasks 가져오기">Notion 동기화</button>
       <button class="bsm pri" id="btn-signin" onclick="signIn()">Google 로그인</button>
       <button class="bsm" id="btn-migrate" onclick="migrateToTasksCalendar()" style="display:none" title="기존 일정을 Tasks 캘린더로 이전">📦 Tasks로 이전</button>
@@ -677,6 +678,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     </div>
     <div class="sp-row">
       <div class="sp-field"><div class="sp-label">계획 시간(분)</div><input class="sp-date" id="sp-time" type="number" min="0" style="width:80px" onchange="autoSavePanel()"></div>
+      <div class="sp-field"><div class="sp-label">배치 날짜</div><input class="sp-date" id="sp-scheduled-date" type="date" onchange="autoSavePanel()"></div>
     </div>
     <div class="sp-row">
       <div class="sp-field"><div class="sp-label">시작 시간</div><select class="sp-select" id="sp-starthour" onchange="autoSavePanel()"><option value="">미정</option><option value="0">오전 12시</option><option value="1">오전 1시</option><option value="2">오전 2시</option><option value="3">오전 3시</option><option value="4">오전 4시</option><option value="5">오전 5시</option><option value="6">오전 6시</option><option value="7">오전 7시</option><option value="8">오전 8시</option><option value="9">오전 9시</option><option value="10">오전 10시</option><option value="11">오전 11시</option><option value="12">오후 12시</option><option value="13">오후 1시</option><option value="14">오후 2시</option><option value="15">오후 3시</option><option value="16">오후 4시</option><option value="17">오후 5시</option><option value="18">오후 6시</option><option value="19">오후 7시</option><option value="20">오후 8시</option><option value="21">오후 9시</option><option value="22">오후 10시</option><option value="23">오후 11시</option></select></div>
@@ -707,6 +709,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
       </select>
     </div>
     <div class="field"><label>프로젝트 이름</label><input id="pf-name" placeholder="이름..."></div>
+    <div class="field"><label>유형</label><select id="pf-type"><option value="Project">Project</option><option value="Category">Category</option></select></div>
     <div id="pf-icon-section">
       <div class="field"><label>아이콘</label>
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px">
@@ -786,6 +789,15 @@ let tokenExpiry=parseInt(sessionStorage.getItem('jido_token_expiry')||'0');
 let driveFileId=null,syncTimeout=null;
 let gcalEvents=[];
 let notionSyncTimer=null;
+let notionWriteTimer=null;
+let notionWriteInFlight=false;
+let notionReady=false;
+let notionMerging=false;
+let notionForceInitialUpload=false;
+let notionProjectBaseline=new Map();
+let notionTaskBaseline=new Map();
+let notionKnownProjectIds=new Set();
+let notionKnownTaskIds=new Set();
 const NOTION_SYNC_URL='https://jido-pm-notion.jisan-c50.workers.dev';
 try{ localStorage.removeItem('jido_notion_sync_token'); }catch(e){}
 
@@ -801,10 +813,133 @@ function esc(value){
   return String(value??'').replace(/[&<>"']/g,ch=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[ch]));
 }
 
-function mergeNotionData(payload){
+function setNotionWriteStatus(type,text){
+  const dot=document.getElementById('notion-write-dot');
+  const label=document.getElementById('notion-write-text');
+  if(dot)dot.className='dot'+(type?' '+type:'');
+  if(label)label.textContent=text;
+}
+
+function projectNotionData(p){
+  const parent=projects.find(x=>x.id===p.parentId);
+  return{
+    name:p.name,
+    type:p.notionType||'Project',
+    stage:p.notionStage||'Planning',
+    notionParentId:parent?.notionId||''
+  };
+}
+
+function scheduledAtForTask(t){
+  if(t.startHour===undefined||t.startHour===null||t.startHour==='')return'';
+  const ds=t.scheduledDate||'';
+  if(!ds)return'';
+  const hh=String(Number(t.startHour)||0).padStart(2,'0');
+  const mm=String(Number(t.startMin)||0).padStart(2,'0');
+  return`${ds}T${hh}:${mm}:00+09:00`;
+}
+
+function taskNotionData(t){
+  const project=projects.find(p=>p.id===t.projId);
+  const parent=tasks.find(x=>x.id===t.parentId);
+  const dependency=tasks.find(x=>x.id===t.dependsOn);
+  return{
+    name:t.name,
+    status:t.status,
+    notionProjectId:project?.notionId||'',
+    plannedWeek:t.plannedWeek||'',
+    due:t.due||'',
+    scheduledAt:scheduledAtForTask(t),
+    duration:Number(t.plannedTime)||0,
+    order:Number(t.order)||0,
+    notionParentTaskId:parent?.notionId||'',
+    notionDependencyId:dependency?.notionId||''
+  };
+}
+
+function notionFingerprint(data){return JSON.stringify(data);}
+function captureNotionBaseline(){
+  notionProjectBaseline=new Map(projects.filter(p=>p.notionId).map(p=>[p.id,{notionId:p.notionId,data:projectNotionData(p),fingerprint:notionFingerprint(projectNotionData(p))}]));
+  notionTaskBaseline=new Map(tasks.filter(t=>t.notionId).map(t=>[t.id,{notionId:t.notionId,data:taskNotionData(t),fingerprint:notionFingerprint(taskNotionData(t))}]));
+  notionKnownProjectIds=new Set(projects.map(p=>p.id));
+  notionKnownTaskIds=new Set(tasks.map(t=>t.id));
+}
+
+function projectDepth(p){let d=0,current=p,seen=new Set();while(current?.parentId&&!seen.has(current.id)){seen.add(current.id);current=projects.find(x=>x.id===current.parentId);d++;}return d;}
+function taskDepth(t){let d=0,current=t,seen=new Set();while(current?.parentId&&!seen.has(current.id)){seen.add(current.id);current=tasks.find(x=>x.id===current.parentId);d++;}return d;}
+
+async function notionWriteRequest(entity,notionId,data,action='upsert'){
+  const {url,token}=getNotionSyncConfig();
+  const response=await fetch(url+'/api/notion/write',{
+    method:'POST',
+    headers:{'Authorization':'Bearer '+token,'Content-Type':'application/json'},
+    body:JSON.stringify({entity,action,notionId:notionId||'',data})
+  });
+  const payload=await response.json().catch(()=>({}));
+  if(!response.ok)throw new Error(payload.error||'Notion 저장 실패');
+  return payload;
+}
+
+function scheduleNotionWrite(){
+  if(!notionReady||notionMerging)return;
+  clearTimeout(notionWriteTimer);
+  setNotionWriteStatus('syncing','Notion 저장 대기');
+  notionWriteTimer=setTimeout(()=>flushNotionWrites(),900);
+}
+
+async function flushNotionWrites(){
+  if(!notionReady||notionMerging||notionWriteInFlight)return;
+  notionWriteInFlight=true;
+  setNotionWriteStatus('syncing','Notion 저장 중...');
+  try{
+    // Removed local records are archived instead of permanently deleted.
+    for(const [id,old] of notionTaskBaseline){
+      if(!tasks.some(t=>t.id===id))await notionWriteRequest('task',old.notionId,old.data,'archive');
+    }
+    for(const [id,old] of notionProjectBaseline){
+      if(!projects.some(p=>p.id===id))await notionWriteRequest('project',old.notionId,old.data,'archive');
+    }
+
+    const newProjects=projects.filter(p=>!p.notionId&&!notionKnownProjectIds.has(p.id)).sort((a,b)=>projectDepth(a)-projectDepth(b));
+    for(const p of newProjects){
+      const result=await notionWriteRequest('project','',projectNotionData(p));
+      p.notionId=result.notionId;p.notionUrl=result.notionUrl||'';
+    }
+    for(const p of projects.filter(p=>p.notionId)){
+      const data=projectNotionData(p),old=notionProjectBaseline.get(p.id);
+      if(notionForceInitialUpload||!old||old.fingerprint!==notionFingerprint(data))await notionWriteRequest('project',p.notionId,data);
+    }
+
+    const newTasks=tasks.filter(t=>!t.notionId&&!notionKnownTaskIds.has(t.id)).sort((a,b)=>taskDepth(a)-taskDepth(b));
+    for(const t of newTasks){
+      const result=await notionWriteRequest('task','',taskNotionData(t));
+      t.notionId=result.notionId;t.notionUrl=result.notionUrl||'';
+    }
+    const createdTaskIds=new Set(newTasks.map(t=>t.id));
+    for(const t of tasks.filter(t=>t.notionId)){
+      const data=taskNotionData(t),old=notionTaskBaseline.get(t.id);
+      if(notionForceInitialUpload||createdTaskIds.has(t.id)||!old||old.fingerprint!==notionFingerprint(data))await notionWriteRequest('task',t.notionId,data);
+    }
+
+    notionForceInitialUpload=false;
+    localStorage.setItem('jido_bidi_migrated','1');
+    captureNotionBaseline();
+    saveLocal();
+    setNotionWriteStatus('ok','Notion 저장 완료');
+  }catch(error){
+    console.warn('Notion write failed',error);
+    setNotionWriteStatus('err','Notion 저장 실패 · 재시도');
+    showToast(error.message||'Notion 저장 실패');
+  }finally{
+    notionWriteInFlight=false;
+  }
+}
+
+function mergeNotionData(payload,{preservePmOnly=false}={}){
   const incomingProjects=Array.isArray(payload.projects)?payload.projects:[];
   const incomingTasks=Array.isArray(payload.tasks)?payload.tasks:[];
   const projectIds=new Map();
+  const taskIds=new Map();
 
   incomingProjects.forEach((remote,index)=>{
     const notionId=normalizeNotionId(remote.notionId);
@@ -845,12 +980,39 @@ function mergeNotionData(payload){
       local.status=remote.status;
       local.due=remote.due||'';
       local.plannedWeek=remote.plannedWeek||'';
+      local.order=Number(remote.order)||local.order||nextTaskOrder(remoteProjId);
+      local.plannedTime=Number(remote.duration)||local.plannedTime||0;
+      if(remote.scheduledAt){
+        const scheduled=new Date(remote.scheduledAt);
+        if(!Number.isNaN(scheduled.getTime())){
+          local.scheduledDate=dailyDateStr(scheduled);
+          local.startHour=scheduled.getHours();
+          local.startMin=scheduled.getMinutes();
+        }
+      }else if(!preservePmOnly){
+        local.scheduledDate='';
+        local.startHour=undefined;
+        local.startMin=undefined;
+      }
       local.projId=remoteProjId;
       local.notionId=remote.notionId;
       local.notionUrl=remote.notionUrl;
     }else{
-      tasks.push({id:nextTaskId++,name:remote.name,parentId:null,projId:remoteProjId,memo:'',status:remote.status,tag:'STUDIO',priority:'mid',due:remote.due||'',plannedWeek:remote.plannedWeek||'',plannedTime:0,order:nextTaskOrder(remoteProjId),notionId:remote.notionId,notionUrl:remote.notionUrl});
+      let scheduledDate='',startHour,startMin;
+      if(remote.scheduledAt){const scheduled=new Date(remote.scheduledAt);if(!Number.isNaN(scheduled.getTime())){scheduledDate=dailyDateStr(scheduled);startHour=scheduled.getHours();startMin=scheduled.getMinutes();}}
+      local={id:nextTaskId++,name:remote.name,parentId:null,dependsOn:null,projId:remoteProjId,memo:'',status:remote.status,tag:'STUDIO',priority:'mid',due:remote.due||'',plannedWeek:remote.plannedWeek||'',scheduledDate,startHour,startMin,plannedTime:Number(remote.duration)||0,order:Number(remote.order)||nextTaskOrder(remoteProjId),notionId:remote.notionId,notionUrl:remote.notionUrl};
+      tasks.push(local);
     }
+    taskIds.set(notionId,local.id);
+  });
+
+  incomingTasks.forEach(remote=>{
+    const local=tasks.find(t=>t.id===taskIds.get(normalizeNotionId(remote.notionId)));
+    if(!local)return;
+    const parentId=taskIds.get(normalizeNotionId(remote.notionParentTaskId))||null;
+    const dependsOn=taskIds.get(normalizeNotionId(remote.notionDependencyId))||null;
+    if(!preservePmOnly||remote.notionParentTaskId)local.parentId=parentId!==local.id?parentId:null;
+    if(!preservePmOnly||remote.notionDependencyId)local.dependsOn=dependsOn!==local.id?dependsOn:null;
   });
 
   const incomingTaskIds=new Set(incomingTasks.map(t=>normalizeNotionId(t.notionId)));
@@ -885,6 +1047,7 @@ async function syncFromNotion({silent=false}={}){
   const btn=document.getElementById('btn-notion-sync');
   if(btn) btn.disabled=true;
   setSyncStatus('syncing','Notion 동기화 중...');
+  notionMerging=true;
   try{
     const headers=token?{'Authorization':'Bearer '+token}:{};
     const response=await fetch(url+'/api/notion/sync',{headers});
@@ -892,10 +1055,19 @@ async function syncFromNotion({silent=false}={}){
     if(!response.ok) throw new Error(payload.error||'Notion 동기화 실패');
     const before=JSON.stringify({projects,tasks});
     pushUndo();
-    mergeNotionData(payload);
+    const firstBidirectionalMigration=!localStorage.getItem('jido_bidi_migrated');
+    mergeNotionData(payload,{preservePmOnly:firstBidirectionalMigration});
     const changed=before!==JSON.stringify({projects,tasks});
     if(!changed) undoStack.pop();
     if(changed){ saveLocal(); scheduleSave(); renderAll(); }
+    notionReady=true;
+    captureNotionBaseline();
+    setNotionWriteStatus('ok','Notion 양방향 연결됨');
+    if(firstBidirectionalMigration){
+      notionForceInitialUpload=true;
+      notionMerging=false;
+      await flushNotionWrites();
+    }
     const syncedTime=new Date(payload.syncedAt||Date.now()).toLocaleTimeString('ko-KR',{hour:'2-digit',minute:'2-digit'});
     setSyncStatus('ok',`Notion 동기화 ${syncedTime}`);
     if(!silent) showToast(`Notion: 프로젝트 ${payload.projects.length}개, 작업 ${payload.tasks.length}개`);
@@ -903,6 +1075,7 @@ async function syncFromNotion({silent=false}={}){
     setSyncStatus('err','Notion 오류');
     if(!silent) showToast(error.message||'Notion 동기화 실패');
   }finally{
+    notionMerging=false;
     if(btn) btn.disabled=false;
   }
 }
@@ -1111,7 +1284,7 @@ async function saveToDrive(){
     setSyncStatus('ok','저장 완료');
   }catch(e){setSyncStatus('err','저장 실패');}
 }
-function scheduleSave(){clearTimeout(syncTimeout);syncTimeout=setTimeout(saveToDrive,500);}
+function scheduleSave(){clearTimeout(syncTimeout);syncTimeout=setTimeout(saveToDrive,500);scheduleNotionWrite();}
 function pushUndo(){
   undoStack.push({
     tasks:JSON.parse(JSON.stringify(tasks)),
@@ -1746,7 +1919,7 @@ function renderCal(){
     const ge=gcalEvents.filter(e=>{
       const eDate=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
       if(eDate!==ds) return false;
-      return !tasks.some(t=>(t.gcalEventId&&t.gcalEventId===e.id)||(t.due===ds&&t.name===e.summary&&t.startHour!==undefined));
+      return !tasks.some(t=>(t.gcalEventId&&t.gcalEventId===e.id)||(taskScheduleDate(t)===ds&&t.name===e.summary&&t.startHour!==undefined));
     });
     const MAX_EV=2;
     const allEvs=[
@@ -1815,6 +1988,8 @@ const SLOTS_PER_HOUR = 2;
 function dailyDateStr(d){
   return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
 }
+function taskScheduleDate(t){return t.scheduledDate||((t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='')?(t.due||''):'');}
+function weekMondayForDate(value){const d=new Date(value);const offset=(d.getDay()+6)%7;d.setDate(d.getDate()-offset);return dailyDateStr(d);}
 function changeDailyDate(d){ dailyDate=new Date(dailyDate); dailyDate.setDate(dailyDate.getDate()+d); dailyDate.setHours(0,0,0,0); renderDaily(); }
 function goToday(){ dailyDate=new Date(); dailyDate.setHours(0,0,0,0); renderDaily(); }
 function changeWeek(d){ weekOffset+=d; renderWeekly(); }
@@ -2061,10 +2236,10 @@ function renderDailyTimeline(ds, dayTasks){
   // timeLogs 기준으로만 블록 렌더링 (Cmd+드래그로 여러 날짜에 log 추가해도 정확히 표시)
   const logsForDay=timeLogs.filter(l=>l.date===ds);
 
-  // timeLogs에 없지만 t.due===ds && t.startHour 있는 것도 포함 (직접 드롭한 경우)
+  // timeLogs에 없지만 Scheduled at이 해당 날짜인 작업도 포함
   const loggedTaskIds=new Set(logsForDay.map(l=>l.taskId));
   const unloggedScheduled=tasks.filter(t=>
-    t.due===ds &&
+    taskScheduleDate(t)===ds &&
     t.startHour!==undefined && t.startHour!==null && t.startHour!=='' &&
     !loggedTaskIds.has(t.id)
   );
@@ -2084,7 +2259,7 @@ function renderDailyTimeline(ds, dayTasks){
   const gcalForDay=gcalEvents.filter(e=>{
     const ed=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
     if(ed!==ds||!e.start.dateTime) return false;
-    return !tasks.some(t=>(t.gcalEventId&&t.gcalEventId===e.id)||(t.due===ds&&t.name===e.summary&&t.startHour!==undefined));
+    return !tasks.some(t=>(t.gcalEventId&&t.gcalEventId===e.id)||(taskScheduleDate(t)===ds&&t.name===e.summary&&t.startHour!==undefined));
   });
 
   // Convert gcal to block-like for column computation
@@ -2239,7 +2414,7 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
           status:'todo',
           tag:t.tag||'STUDIO',
           priority:t.priority||'mid',
-          due:ds,
+          due:'',scheduledDate:ds,
           plannedTime:t.plannedTime||60,
           startHour:newH,
           startMin:newM,
@@ -2249,10 +2424,10 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
         showToast('독립 작업으로 복사됐어요');
       } else {
         // Normal drag: 이동 (기존 날짜 log → 새 날짜로 변경)
-        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(t.due||ds));
+        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(taskScheduleDate(t)||ds));
         if(oldLog){ oldLog.date=ds; oldLog.startHour=newH; oldLog.startMin=newM; }
         else{ timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId}); }
-        t.startHour=newH; t.startMin=newM; t.due=ds;
+        t.startHour=newH; t.startMin=newM; t.scheduledDate=ds;
       }
       saveLocal();scheduleSave();renderDaily();
     }
@@ -2447,7 +2622,7 @@ function onSlotDrop(e, h, half){
     } else {
       timeLogs.push({id:nextLogId++,taskId:id,date:ds,startHour:dropH,startMin:dropM,duration:t.plannedTime||60,projId:t.projId});
     }
-    t.startHour=dropH; t.startMin=dropM; t.due=ds;
+    t.startHour=dropH; t.startMin=dropM; t.scheduledDate=ds;
   } else {
     const existingLog=timeLogs.find(l=>l.taskId===id&&l.date===ds);
     if(existingLog){
@@ -2455,7 +2630,7 @@ function onSlotDrop(e, h, half){
     } else {
       timeLogs.push({id:nextLogId++,taskId:id,date:ds,startHour:dropH,startMin:dropM,duration:t.plannedTime||60,projId:t.projId});
     }
-    t.startHour=dropH; t.startMin=dropM; t.due=ds;
+    t.startHour=dropH; t.startMin=dropM; t.scheduledDate=ds;
     if(!t.plannedTime) t.plannedTime=60;
   }
   saveLocal(); scheduleSave();
@@ -2464,7 +2639,7 @@ function onSlotDrop(e, h, half){
 function onSlotClick(h, half){
   // Quick add task at this time
   const ds=dailyDateStr(dailyDate);
-  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
+  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:'',scheduledDate:ds,plannedTime:60,startHour:h,startMin:half?30:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   tasks.unshift(newTask);
   saveLocal(); scheduleSave(); renderDaily();
   setTimeout(()=>openPanel(newTask.id),50);
@@ -2541,7 +2716,8 @@ function onTodoEnter(e){
   const name=input.value.trim(); if(!name) return;
   if(!dailyDate) dailyDate=new Date();
   const ds=dailyDateStr(dailyDate);
-  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
+  const weekMonday=weekMondayForDate(dailyDate);
+  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:'',plannedWeek:weekMonday,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   pushUndo();
   tasks.unshift(newTask);
   input.value='';
@@ -2758,7 +2934,7 @@ function renderWeekly(){
     col._date=d; // store date object for drag handler
 
     // PM tasks for this day
-    const dayTasks=tasks.filter(t=>t.due===ds&&t.startHour!=null&&t.startHour!==''&&t.startHour!==undefined);
+    const dayTasks=tasks.filter(t=>taskScheduleDate(t)===ds&&t.startHour!=null&&t.startHour!==''&&t.startHour!==undefined);
 
     // timeLogs for this day
     const logsForDay=timeLogs.filter(l=>l.date===ds);
@@ -2774,7 +2950,7 @@ function renderWeekly(){
     const gcalBlocks=gcalEvents.filter(e=>{
       if(!e.start.dateTime) return false;
       if(e.start.dateTime.split('T')[0]!==ds) return false;
-      return !tasks.some(t=>(t.gcalEventId&&t.gcalEventId===e.id)||(t.due===ds&&t.name===e.summary&&t.startHour!==undefined));
+      return !tasks.some(t=>(t.gcalEventId&&t.gcalEventId===e.id)||(taskScheduleDate(t)===ds&&t.name===e.summary&&t.startHour!==undefined));
     });
 
     // Convert gcal to block-like objects for column computation
@@ -2877,17 +3053,17 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
         const newTask={
           id:nextTaskId++, name:t.name, parentId:null, projId:t.projId, order:nextTaskOrder(t.projId),
           memo:'', status:'todo', tag:t.tag||'STUDIO', priority:t.priority||'mid',
-          due:ds, plannedTime:t.plannedTime||60, startHour:newH, startMin:newM,
+          due:'', scheduledDate:ds, plannedTime:t.plannedTime||60, startHour:newH, startMin:newM,
         };
         tasks.unshift(newTask);
         timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:newTask.plannedTime,projId:newTask.projId});
         showToast('독립 작업으로 복사됐어요');
       } else {
         // Normal move: 기존 log 날짜 변경
-        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(t.due||ds));
+        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(taskScheduleDate(t)||ds));
         if(oldLog){ oldLog.startHour=newH; oldLog.startMin=newM; oldLog.date=ds; }
         else timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
-        t.startHour=newH; t.startMin=newM; t.due=ds;
+        t.startHour=newH; t.startMin=newM; t.scheduledDate=ds;
       }
       saveLocal();scheduleSave();renderWeekly();renderDaily();
     }
@@ -3000,7 +3176,7 @@ function handleWeeklyColDrop(e, ds){
   const relY=e.clientY-rect.top+col.scrollTop;
   const mins=Math.round(topToMins(relY)/30)*30;
   const h=Math.floor(mins/60), m=mins%60;
-  t.due=ds; t.startHour=Math.min(23,Math.max(0,h)); t.startMin=m;
+  t.scheduledDate=ds; t.startHour=Math.min(23,Math.max(0,h)); t.startMin=m;
   if(!t.plannedTime) t.plannedTime=60;
   saveLocal();scheduleSave();renderWeekly();renderDaily();
   showToast(fmtHM(t.startHour,t.startMin)+' 로 이동했어요');
@@ -3036,14 +3212,14 @@ function onWeeklyTodoEnter(e){
   const name=input.value.trim(); if(!name) return;
   const dates=getWeekDates();
   const ds=dailyDateStr(dates[0]); // default to start of week
-  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
+  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:'',plannedWeek:ds,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   pushUndo();
   tasks.unshift(newTask);
   input.value='';
   saveLocal();scheduleSave();renderWeekly();
 }
 function onWeekCellClick(ds,h,half){
-  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,plannedTime:60,startHour:h,startMin:half?30:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
+  const newTask={id:nextTaskId++,name:'새 작업',parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:'',scheduledDate:ds,plannedWeek:dailyDateStr(getWeekDates()[0]),plannedTime:60,startHour:h,startMin:half?30:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   tasks.unshift(newTask);
   saveLocal(); scheduleSave(); renderWeekly();
   setTimeout(()=>openPanel(newTask.id),50);
@@ -3059,7 +3235,7 @@ function handleWeeklyDrop(e, cell){
   window._dragId=null;
   if(!id||isNaN(id)) return;
   const t=tasks.find(t=>t.id===id); if(!t) return;
-  t.due=ds; t.startHour=h; t.startMin=half?30:0;
+  t.scheduledDate=ds; t.startHour=h; t.startMin=half?30:0;
   if(!t.plannedTime) t.plannedTime=60;
   saveLocal(); scheduleSave(); renderWeekly(); renderDaily();
   showToast(fmtHM(h,half?30:0)+' 로 이동했어요');
@@ -3101,13 +3277,13 @@ function renderMonthly(){
   for(let d=1;d<=daysInMonth;d++){
     const ds=monthlyYear+'-'+String(monthlyMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const isToday=ds===todayS;
-    const dayTasks=tasks.filter(t=>t.due===ds);
+    const dayTasks=tasks.filter(t=>t.due===ds||taskScheduleDate(t)===ds);
     const gcalDay=gcalEvents.filter(e=>{
       const ed=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
       if(ed!==ds) return false;
       const isDuplicate=tasks.some(t=>
         (t.gcalEventId&&t.gcalEventId===e.id)||
-        (t.due===ds&&t.name===e.summary&&t.startHour!==undefined)
+        (taskScheduleDate(t)===ds&&t.name===e.summary&&t.startHour!==undefined)
       );
       return !isDuplicate;
     });
@@ -3371,6 +3547,7 @@ function openPanel(id){
   document.getElementById('sp-priority').value=t.priority;
   document.getElementById('sp-due').value=t.due||'';
   document.getElementById('sp-planned-week').value=t.plannedWeek||'';
+  document.getElementById('sp-scheduled-date').value=t.scheduledDate||'';
   document.getElementById('sp-time').value=t.plannedTime||0;
   document.getElementById('sp-starthour').value=t.startHour??'';
   document.getElementById('sp-memo').value=t.memo||'';
@@ -3426,6 +3603,7 @@ function savePanel(silent=false){
   t.priority=document.getElementById('sp-priority').value;
   t.due=document.getElementById('sp-due').value;
   t.plannedWeek=document.getElementById('sp-planned-week').value;
+  t.scheduledDate=document.getElementById('sp-scheduled-date').value;
   t.plannedTime=parseInt(document.getElementById('sp-time').value)||0;
   const sh=document.getElementById('sp-starthour').value;
   t.startHour=sh===''?undefined:parseInt(sh);
@@ -3600,6 +3778,7 @@ function openProjModal(id, presetParentId=null){
   if(id===null){
     document.getElementById('proj-modal-title').textContent=presetParentId?'새 페이즈/하위 프로젝트':'새 프로젝트';
     document.getElementById('pf-name').value='';
+    document.getElementById('pf-type').value='Project';
     document.getElementById('pf-desc').value='';
     document.getElementById('pf-parent').value=presetParentId||'';
     selIcon=ICONS[0];selColor=COLORS[0];
@@ -3608,6 +3787,7 @@ function openProjModal(id, presetParentId=null){
     const p=projects.find(p=>p.id===id);
     document.getElementById('proj-modal-title').textContent='프로젝트 수정';
     document.getElementById('pf-name').value=p.name;
+    document.getElementById('pf-type').value=p.notionType||'Project';
     document.getElementById('pf-desc').value=p.desc||'';
     document.getElementById('pf-parent').value=p.parentId||'';
     const disp=getProjDisplay(id);
@@ -3631,7 +3811,8 @@ function saveProject(){
     icon:isPhase?null:selIcon,
     color:isPhase?null:selColor,
     desc:document.getElementById('pf-desc').value.trim(),
-    parentId
+    parentId,
+    notionType:document.getElementById('pf-type').value
   };
   pushUndo();
   if(editingProjId===null)projects.push({id:nextProjId++,...data});
