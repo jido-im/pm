@@ -61,6 +61,10 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 
 /* Views */
 .view{display:none}.view.active{display:block}
+.view-toolbar{display:flex;justify-content:flex-end;align-items:center;margin:-4px 0 10px}
+.visibility-toggle{display:inline-flex;align-items:center;gap:6px;font-size:12px;padding:6px 10px;border:1px solid var(--border2);border-radius:8px;background:var(--card);color:var(--text2);font-family:inherit;cursor:pointer;transition:all .15s}
+.visibility-toggle:hover{background:var(--bg)}
+.visibility-toggle.active{color:var(--blue);border-color:#a8c8e8;background:#eef6ff;font-weight:600}
 
 /* Stats */
 .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-bottom:16px}
@@ -69,7 +73,8 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 
 /* Board */
 .board{display:grid;grid-template-columns:repeat(4,1fr);gap:10px}
-@media(max-width:700px){.board{grid-template-columns:repeat(2,1fr)}}
+.board.hide-done{grid-template-columns:repeat(3,1fr)}
+@media(max-width:700px){.board,.board.hide-done{grid-template-columns:repeat(2,1fr)}}
 .col{background:#eae8e2;border-radius:12px;padding:11px}
 .col-head{font-size:11px;font-weight:700;color:#999;margin-bottom:9px;display:flex;justify-content:space-between;text-transform:uppercase;letter-spacing:.06em}
 .col-cnt{background:var(--card);border-radius:10px;padding:1px 7px;font-size:11px;color:var(--text2)}
@@ -591,6 +596,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
   </div>
 
   <div id="view-board" class="view active">
+    <div class="view-toolbar"><button class="visibility-toggle" id="board-done-toggle" onclick="toggleDoneVisibility('board')">✓ 완료 숨기기</button></div>
     <div class="stats" id="stats"></div>
     <div class="board" id="board"></div>
   </div>
@@ -609,7 +615,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
       <div class="project-workspace-panel">
         <div class="project-workspace-head">
           <div><div class="sec-title" style="margin:0 0 3px">프로젝트 작업공간</div><div style="font-size:11px;color:var(--text3)">대단원 안에서 태스크와 하위 프로젝트를 바로 정리하세요</div></div>
-          <div style="display:flex;align-items:center;gap:10px"><span style="font-size:10px;color:var(--blue)">오른쪽 점 → 왼쪽 점으로 연결</span>
+          <div style="display:flex;align-items:center;gap:10px"><button class="visibility-toggle" id="list-done-toggle" onclick="toggleDoneVisibility('list')">✓ 완료 숨기기</button><span style="font-size:10px;color:var(--blue)">오른쪽 점 → 왼쪽 점으로 연결</span>
           <button class="bsm pri" onclick="openProjModal(null)">+ 새 프로젝트</button>
           </div>
         </div>
@@ -847,6 +853,8 @@ let nextLogId=1;
 let undoStack=[]; // [{tasks, timeLogs, projects, nextTaskId, nextLogId, nextProjId}]
 const MAX_UNDO=30;
 let selProjId=null;
+let hideDoneBoard=localStorage.getItem('jido_hide_done_board')==='1';
+let hideDoneList=localStorage.getItem('jido_hide_done_list')==='1';
 let calYear=new Date().getFullYear(),calMonth=new Date().getMonth();
 let selIcon=ICONS[0],selColor=COLORS[0];
 let editingProjId=null;
@@ -1552,6 +1560,25 @@ function renderProjFilter(){
 }
 function setFilter(id){selProjId=id;renderAll();}
 
+function toggleDoneVisibility(view){
+  if(view==='board'){
+    hideDoneBoard=!hideDoneBoard;
+    localStorage.setItem('jido_hide_done_board',hideDoneBoard?'1':'0');
+    renderBoard();
+  }else{
+    hideDoneList=!hideDoneList;
+    localStorage.setItem('jido_hide_done_list',hideDoneList?'1':'0');
+    renderTree();
+  }
+}
+function syncDoneToggle(view,hidden){
+  const btn=document.getElementById(view+'-done-toggle');
+  if(!btn)return;
+  btn.classList.toggle('active',hidden);
+  btn.textContent=hidden?'✓ 완료 표시':'✓ 완료 숨기기';
+  btn.setAttribute('aria-pressed',hidden?'true':'false');
+}
+
 // ── Stats ─────────────────────────────────────────────────
 function renderStats(){
   const ft=tasks.filter(taskMatchesSelectedProject);
@@ -1565,8 +1592,12 @@ function renderStats(){
 
 // ── Board ─────────────────────────────────────────────────
 function renderBoard(){
-  const ft=tasks.filter(t=>!t.parentId&&taskMatchesSelectedProject(t));
-  document.getElementById('board').innerHTML=Object.entries(COLS).map(([k,v])=>{
+  syncDoneToggle('board',hideDoneBoard);
+  const ft=tasks.filter(t=>!t.parentId&&taskMatchesSelectedProject(t)&&(!hideDoneBoard||t.status!=='done'));
+  const columns=Object.entries(COLS).filter(([k])=>!hideDoneBoard||k!=='done');
+  const board=document.getElementById('board');
+  board.classList.toggle('hide-done',hideDoneBoard);
+  board.innerHTML=columns.map(([k,v])=>{
     const cards=ft.filter(t=>t.status===k);
     return `<div class="col"><div class="col-head">${v}<span class="col-cnt">${cards.length}</span></div>`+
       cards.map(c=>{
@@ -1598,6 +1629,7 @@ function toggleProjCollapse(id){
 
 // ── Main entry for list tab ──
 function renderTree(){
+  syncDoneToggle('list',hideDoneList);
   renderUnassignedPanel();
   renderProjectWorkspace();
 }
@@ -1607,9 +1639,11 @@ function renderUnassignedPanel(){
   const itemsEl=document.getElementById('unassigned-task-list');
   const countEl=document.getElementById('task-list-count');
   if(!itemsEl)return;
-  const unassigned=tasks.filter(t=>!t.projId||!projects.find(p=>p.id===t.projId));
-  if(countEl)countEl.textContent=unassigned.length+'개';
-  itemsEl.innerHTML=unassigned.length?renderExplorerTasks(unassigned):'<div style="font-size:12px;color:var(--text3);padding:18px 4px;text-align:center">모든 작업이 분류됐어요 ✓</div>';
+  const allUnassigned=tasks.filter(t=>!t.projId||!projects.find(p=>p.id===t.projId));
+  const unassigned=allUnassigned.filter(t=>!hideDoneList||t.status!=='done');
+  if(countEl)countEl.textContent=(hideDoneList?'미완료 ':'')+unassigned.length+'개';
+  const emptyMessage=hideDoneList&&allUnassigned.length?'완료 작업을 제외하면 비어 있어요':'모든 작업이 분류됐어요 ✓';
+  itemsEl.innerHTML=unassigned.length?renderExplorerTasks(unassigned):`<div style="font-size:12px;color:var(--text3);padding:18px 4px;text-align:center">${emptyMessage}</div>`;
 }
 
 function renderProjectWorkspace(){
@@ -1620,6 +1654,7 @@ function renderProjectWorkspace(){
   workspace.innerHTML=roots.map(root=>{
     const ids=[root.id,...projAllDescendantProjects(root.id).map(p=>p.id)];
     const sectionTasks=tasks.filter(t=>ids.includes(t.projId));
+    const visibleSectionTasks=sectionTasks.filter(t=>!hideDoneList||t.status!=='done');
     const done=sectionTasks.filter(t=>t.status==='done').length;
     const pct=sectionTasks.length?Math.round(done/sectionTasks.length*100):0;
     const collapsed=collapsedExplorerFolders.has(root.id);
@@ -1631,7 +1666,7 @@ function renderProjectWorkspace(){
         </div>
         <div class="task-project-progress"><div class="task-project-progress-track"><div class="task-project-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div><span class="task-project-progress-text">${done}/${sectionTasks.length} 완료</span></div>
       </div>
-      <div class="master-section-body" style="display:${collapsed?'none':'block'}">${renderExplorerProjectContents(root,sectionTasks)}</div>
+      <div class="master-section-body" style="display:${collapsed?'none':'block'}">${renderExplorerProjectContents(root,visibleSectionTasks)}</div>
     </section>`;
   }).join('');
   requestAnimationFrame(()=>requestAnimationFrame(renderDependencyLines));
@@ -1660,8 +1695,9 @@ function renderExplorerProjectContents(project,availableTasks){
 function renderExplorerProjectFolder(project,availableTasks){
   const ids=[project.id,...projAllDescendantProjects(project.id).map(p=>p.id)];
   const folderTasks=availableTasks.filter(t=>ids.includes(t.projId));
-  const done=folderTasks.filter(t=>t.status==='done').length;
-  const pct=folderTasks.length?Math.round(done/folderTasks.length*100):0;
+  const allFolderTasks=tasks.filter(t=>ids.includes(t.projId));
+  const done=allFolderTasks.filter(t=>t.status==='done').length;
+  const pct=allFolderTasks.length?Math.round(done/allFolderTasks.length*100):0;
   const collapsed=collapsedExplorerFolders.has(project.id);
   const disp=getProjDisplay(project.id);
   return`<div class="explorer-folder">
@@ -1670,12 +1706,12 @@ function renderExplorerProjectFolder(project,availableTasks){
         <span class="explorer-folder-arrow">${collapsed?'▶':'▼'}</span><span>${esc(disp.icon||'📁')}</span>
         <span class="explorer-folder-name" style="color:${disp.color}">${esc(project.name)}</span>
         ${projectTypeBadge(project)}
-        <span class="explorer-folder-progress">${folderTasks.length}개 · ${pct}%</span>
+        <span class="explorer-folder-progress">${allFolderTasks.length}개 · ${pct}%</span>
         <button class="inline-add-btn" onclick="quickAddTaskToProject(${project.id},event)">+ 작업</button>
       </div>
       <div class="explorer-folder-progress-row" onclick="toggleExplorerFolder(${project.id})">
         <div class="explorer-folder-progress-track"><div class="explorer-folder-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div>
-        <span class="explorer-folder-progress-count">${done}/${folderTasks.length} 완료</span>
+        <span class="explorer-folder-progress-count">${done}/${allFolderTasks.length} 완료</span>
       </div>
     </div>
     <div class="explorer-folder-body" style="display:${collapsed?'none':'block'}">${renderExplorerProjectContents(project,availableTasks)}</div>
