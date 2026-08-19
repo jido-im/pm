@@ -360,10 +360,15 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .tl-add{position:absolute;inset:0;cursor:pointer;z-index:1}
 
 /* Weekly */
-.weekly-split{display:grid;grid-template-columns:minmax(320px,360px) minmax(0,1fr);gap:14px;align-items:start}
-@media(max-width:700px){.weekly-split{grid-template-columns:1fr}}
-.weekly-todo-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;position:sticky;top:10px;max-height:calc(100vh - 160px);overflow-y:auto}
+.weekly-split{display:flex;flex-direction:column;gap:14px}
+.weekly-todo-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px}
 .weekly-todo-panel .todo-name{white-space:normal;line-height:1.35;overflow-wrap:anywhere}
+.weekly-todo-panel .todo-list{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.weekly-todo-panel .todo-list>.remaining-section{display:contents}
+.weekly-todo-panel .todo-list>.remaining-section>.remaining-header{grid-column:1/-1;margin-top:6px}
+.weekly-todo-panel .todo-list>.weekly-empty{grid-column:1/-1}
+@media(max-width:820px){.weekly-todo-panel .todo-list{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:560px){.weekly-todo-panel .todo-list{grid-template-columns:1fr}}
 .weekly-progress{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
 .weekly-progress-card{padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer}
 .weekly-progress-head{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700}
@@ -375,8 +380,14 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-header{display:grid;border-bottom:2px solid var(--border);position:sticky;top:0;background:var(--card);z-index:20}
 .weekly-day-hd{font-size:12px;font-weight:600;text-align:center;padding:8px 4px;border-right:1px solid var(--border);color:var(--text2);cursor:pointer}
 .weekly-allday-row{display:grid;border-bottom:1px solid var(--border);background:var(--bg)}
-.weekly-allday-cell{border-right:1px solid var(--border);padding:2px 3px;min-height:20px;font-size:10px}
+.weekly-allday-cell{border-right:1px solid var(--border);padding:3px;min-height:28px;font-size:10px}
+.weekly-allday-cell.drag-over{background:#E6F1FB;outline:2px dashed var(--blue);outline-offset:-2px}
 .weekly-allday-ev{background:#4285f422;color:#4285f4;border-radius:3px;padding:1px 4px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500}
+.weekly-day-task{position:relative;background:#fff;border:1px solid var(--border);border-left:3px solid var(--blue);border-radius:5px;padding:3px 17px 3px 5px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:grab;font-weight:600}
+.weekly-day-task-remove,.weekly-unschedule-btn{position:absolute;border:none;background:transparent;color:inherit;cursor:pointer;font-weight:700;line-height:1;padding:2px;opacity:.55}
+.weekly-day-task-remove{right:3px;top:2px}
+.weekly-unschedule-btn{right:3px;top:2px;z-index:35}
+.weekly-day-task-remove:hover,.weekly-unschedule-btn:hover{opacity:1;color:var(--red)}
 .weekly-day-hd:last-child{border-right:none}
 .weekly-day-hd:hover{color:var(--blue)}
 .weekly-day-hd.today-col{color:var(--blue);font-weight:700}
@@ -676,7 +687,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
     </div>
     <div class="weekly-split">
       <div class="weekly-todo-panel">
-        <div class="sec-title" style="margin-bottom:10px">이번 주 작업</div>
+        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:12px;margin-bottom:10px"><div><div class="sec-title">날짜 미정 작업함</div><div style="font-size:11px;color:var(--text3);margin-top:3px">요일 상단이나 시간표로 드래그해 일정을 정리하세요</div></div><span style="font-size:10px;color:var(--blue);white-space:nowrap">배치하면 여기서 사라져요</span></div>
         <div class="weekly-progress" id="weekly-progress"></div>
         <div class="todo-input-wrap" style="margin-bottom:8px">
           <input class="todo-input" id="weekly-todo-input" placeholder="새 작업 후 엔터..." onkeyup="onWeeklyTodoEnter(event)" oncompositionend="window._composing=false" oncompositionstart="window._composing=true">
@@ -2934,6 +2945,8 @@ function renderWeekly(){
   const weekStart=weekStrs[0];
   const isPlannedThisWeek=t=>t.plannedWeek===weekStart||weekStrs.includes(t.plannedWeek);
   const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||isPlannedThisWeek(t)||t.status==='doing');
+  const hasWeeklySchedule=t=>!!taskScheduleDate(t);
+  const weekInboxTasks=weekTasks.filter(t=>t.status!=='done'&&!hasWeeklySchedule(t));
   const dueWeekTasks=tasks.filter(t=>weekStrs.includes(t.due)||isPlannedThisWeek(t));
   const progressEl=document.getElementById('weekly-progress');
   if(progressEl){
@@ -2959,12 +2972,13 @@ function renderWeekly(){
   // 이월된 미완료: 이번 주 시작일 이전이고 미완료인 작업
   const remainingTasks=tasks.filter(t=>{
     if(t.status==='done') return false;
+    if(hasWeeklySchedule(t)) return false;
     if(weekTasks.includes(t)) return false;
     if(t.due && t.due < weekStart) return true;
     if(t.plannedWeek && t.plannedWeek < weekStart) return true;
     return false;
   });
-  const unscheduledTasks=tasks.filter(t=>t.status!=='done'&&!t.due&&!t.plannedWeek&&!weekTasks.includes(t));
+  const unscheduledTasks=tasks.filter(t=>t.status!=='done'&&!hasWeeklySchedule(t)&&!t.due&&!t.plannedWeek&&!weekTasks.includes(t));
 
   const wList=document.getElementById('weekly-todo-list');
 
@@ -2984,9 +2998,9 @@ function renderWeekly(){
     </div>`;
   }
 
-  const weekHtml=weekTasks.length===0
-    ?'<div style="font-size:12px;color:var(--text3)">이번 주 작업 없음</div>'
-    :weekTasks.map(t=>makeWeeklyTodoItem(t)).join('');
+  const weekHtml=weekInboxTasks.length===0
+    ?''
+    :`<div class="remaining-section"><div class="remaining-header">이번 주 배치 대기 (${weekInboxTasks.length})</div>${weekInboxTasks.map(t=>makeWeeklyTodoItem(t)).join('')}</div>`;
 
   const remainHtml=remainingTasks.length>0?`
     <div class="remaining-section">
@@ -3000,7 +3014,7 @@ function renderWeekly(){
       ${unscheduledTasks.map(t=>makeWeeklyTodoItem(t)).join('')}
     </div>`:'';
 
-  wList.innerHTML=(weekTasks.length===0?'<div style="font-size:12px;color:var(--text3);padding:4px 0">이번 주 작업 없음</div>':weekHtml)+remainHtml+unscheduledHtml;
+  wList.innerHTML=weekHtml+remainHtml+unscheduledHtml||'<div class="weekly-empty" style="font-size:12px;color:var(--text3);padding:8px 0;text-align:center">배치할 작업이 없어요 ✓</div>';
   wList.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
 
   // ── Weekly timeline: absolute positioning (same as daily) ──
@@ -3013,6 +3027,7 @@ function renderWeekly(){
 
   // All-day events per day (종일 일정 - dateTime 없는 것)
   const allDayByDay={};
+  const dayOnlyByDay={};
   dates.forEach(d=>{
     const ds=dailyDateStr(d);
     allDayByDay[ds]=gcalEvents.filter(e=>{
@@ -3021,8 +3036,9 @@ function renderWeekly(){
       const endD=e.end?.date||ed;
       return ed<=ds&&endD>ds;
     });
+    dayOnlyByDay[ds]=tasks.filter(t=>t.status!=='done'&&taskScheduleDate(t)===ds&&(t.startHour===undefined||t.startHour===null||t.startHour===''));
   });
-  const hasAllDay=Object.values(allDayByDay).some(evs=>evs.length>0);
+  const hasAllDay=true;
 
   // Header
   let html = `<div class="weekly-header" style="display:grid;grid-template-columns:${TIME_COL}px repeat(${COLS},1fr)">
@@ -3033,14 +3049,15 @@ function renderWeekly(){
     }).join('')}
   </div>`;
 
-  // All-day row (종일 일정 헤더 아래에 별도 표시)
+  // 날짜만 정한 작업과 종일 일정을 헤더 아래에 표시
   if(hasAllDay){
     html+=`<div class="weekly-allday-row" style="display:grid;grid-template-columns:${TIME_COL}px repeat(${COLS},1fr)">
-      <div class="weekly-allday-cell" style="font-size:10px;color:var(--text3);display:flex;align-items:center;justify-content:flex-end;padding-right:6px">종일</div>
+      <div class="weekly-allday-cell" style="font-size:10px;color:var(--text3);display:flex;align-items:center;justify-content:flex-end;padding-right:6px">시간 미정</div>
       ${dates.map(d=>{
         const ds=dailyDateStr(d);
         const evs=allDayByDay[ds]||[];
-        return`<div class="weekly-allday-cell">${evs.map(e=>`<div class="weekly-allday-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'}">${esc(e.summary||'(종일)')}</div>`).join('')}</div>`;
+        const dayTasks=dayOnlyByDay[ds]||[];
+        return`<div class="weekly-allday-cell" ondragover="weeklyDayDragOver(event)" ondragleave="weeklyDayDragLeave(event)" ondrop="handleWeeklyDayDrop(event,'${ds}')">${dayTasks.map(t=>{const p=getProj(t.projId);return`<div class="weekly-day-task" style="border-left-color:${p.color};color:${p.color}" data-id="${t.id}" draggable="true" ondragstart="onTodoDragStart(event,${t.id})" ondblclick="event.stopPropagation();openPanel(${t.id})">${esc(t.name)}<button class="weekly-day-task-remove" onclick="unscheduleWeeklyTask(${t.id},event)" title="일정에서 빼기">×</button></div>`;}).join('')}${evs.map(e=>`<div class="weekly-allday-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'}">📅 ${esc(e.summary||'(종일)')}</div>`).join('')}</div>`;
       }).join('')}
     </div>`;
   }
@@ -3189,6 +3206,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
     <div class="weekly-block-name" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
     <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
+    <button class="weekly-unschedule-btn" onclick="unscheduleWeeklyTask(${t.id},event)" title="일정에서 빼기">×</button>
     <div class="weekly-block-resize" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;border-radius:0 0 4px 4px"></div>
     <button class="weekly-link-handle output" draggable="true" aria-label="${esc(t.name)}에서 후행 작업 연결 시작" ondragstart="startDependencyDrag(event,${t.id})" ondragend="window._dependencySource=null" onclick="event.stopPropagation()"></button>
   `;
@@ -3197,7 +3215,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
 
   // ── Mouse drag: normal=move, Cmd=add log, Option=copy ──
   el.addEventListener('mousedown', e=>{
-    if(e.target.classList.contains('weekly-block-resize')||e.target.classList.contains('weekly-block-top-handle')||e.target.closest('.weekly-link-handle')) return;
+    if(e.target.classList.contains('weekly-block-resize')||e.target.classList.contains('weekly-block-top-handle')||e.target.closest('.weekly-link-handle')||e.target.closest('.weekly-unschedule-btn')) return;
     e.preventDefault();
     e.stopPropagation();
     const isCmdDrag=e.metaKey||e.ctrlKey;
@@ -3352,6 +3370,33 @@ function startWeeklyResize(e, taskId, el, direction='bottom', ds=null){
 }
 
 
+function weeklyDayDragOver(e){e.preventDefault();e.stopPropagation();e.currentTarget.classList.add('drag-over');}
+function weeklyDayDragLeave(e){e.currentTarget.classList.remove('drag-over');}
+function handleWeeklyDayDrop(e,ds){
+  e.preventDefault();e.stopPropagation();
+  e.currentTarget.classList.remove('drag-over');
+  const id=window._dragId||parseInt(e.dataTransfer.getData('text/plain'))||parseInt(e.dataTransfer.getData('taskId'));
+  window._dragId=null;
+  if(!id||isNaN(id))return;
+  const t=tasks.find(t=>t.id===id);if(!t)return;
+  pushUndo();
+  const oldDate=taskScheduleDate(t);
+  if(oldDate)timeLogs=timeLogs.filter(l=>!(l.taskId===id&&l.date===oldDate));
+  t.scheduledDate=ds;t.startHour=undefined;t.startMin=undefined;
+  saveLocal();scheduleSave();renderWeekly();renderDaily();
+  showToast(ds.slice(5).replace('-','/')+' · 시간 미정으로 배치했어요');
+}
+function unscheduleWeeklyTask(id,e){
+  e?.preventDefault();e?.stopPropagation();
+  const t=tasks.find(t=>t.id===id);if(!t)return;
+  pushUndo();
+  const oldDate=taskScheduleDate(t);
+  if(oldDate)timeLogs=timeLogs.filter(l=>!(l.taskId===id&&l.date===oldDate));
+  t.scheduledDate='';t.startHour=undefined;t.startMin=undefined;
+  saveLocal();scheduleSave();renderWeekly();renderDaily();
+  showToast('날짜 미정 작업함으로 돌려보냈어요');
+}
+
 function handleWeeklyColDrop(e, ds){
   e.preventDefault();
   const id=window._dragId||parseInt(e.dataTransfer.getData('text/plain'))||parseInt(e.dataTransfer.getData('taskId'));
@@ -3364,6 +3409,7 @@ function handleWeeklyColDrop(e, ds){
   const relY=e.clientY-rect.top+col.scrollTop;
   const mins=Math.round(topToMins(relY)/30)*30;
   const h=Math.floor(mins/60), m=mins%60;
+  pushUndo();
   t.scheduledDate=ds; t.startHour=Math.min(23,Math.max(0,h)); t.startMin=m;
   if(!t.plannedTime) t.plannedTime=60;
   saveLocal();scheduleSave();renderWeekly();renderDaily();
@@ -3423,6 +3469,7 @@ function handleWeeklyDrop(e, cell){
   window._dragId=null;
   if(!id||isNaN(id)) return;
   const t=tasks.find(t=>t.id===id); if(!t) return;
+  pushUndo();
   t.scheduledDate=ds; t.startHour=h; t.startMin=half?30:0;
   if(!t.plannedTime) t.plannedTime=60;
   saveLocal(); scheduleSave(); renderWeekly(); renderDaily();
