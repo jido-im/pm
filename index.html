@@ -45,6 +45,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .ntab{padding:6px 13px;font-size:13px;font-family:inherit;border:none;background:none;cursor:pointer;border-radius:7px;color:var(--text2);font-weight:500;transition:all .15s;white-space:nowrap}
 .ntab.active{background:var(--card);color:var(--text);box-shadow:0 1px 3px rgba(0,0,0,.09)}
 .proj-filter{display:flex;gap:4px;flex-wrap:wrap}
+.global-directory-filter{display:flex;flex-direction:column;gap:5px;min-width:0;flex:1}
+.global-sub-filter{display:flex;gap:4px;flex-wrap:wrap;padding-left:4px}
+.global-sub-filter:empty{display:none}
 .pchip{font-size:12px;padding:4px 10px;border-radius:20px;border:1px solid var(--border);background:var(--card);cursor:pointer;font-family:inherit;color:var(--text2);transition:all .15s;display:flex;align-items:center;gap:5px}
 .pchip-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
 .btn-new{margin-left:auto;font-size:13px;padding:7px 13px;border:1.5px solid var(--border2);border-radius:var(--r);background:var(--card);cursor:pointer;color:var(--text2);font-family:inherit;font-weight:500;transition:all .15s;white-space:nowrap}
@@ -140,11 +143,17 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .task-project-progress-text{font-size:10px;color:var(--text3);min-width:64px;text-align:right}
 .task-project-body{padding:4px 6px 6px}
 .explorer-folder{margin:5px 4px;border:1px solid var(--border);border-radius:8px;background:var(--card);overflow:hidden}
+.explorer-folder-summary{background:#f7f6f2}
+.explorer-folder-summary.drop-hover{background:#eaf3fb;box-shadow:inset 0 0 0 2px var(--blue)}
 .explorer-folder-head{display:flex;align-items:center;gap:7px;padding:8px 10px;background:#f7f6f2;cursor:pointer;user-select:none}
 .explorer-folder-head:hover,.explorer-folder-head.drop-hover{background:#eaf3fb;border-color:var(--blue)}
 .explorer-folder-arrow{width:12px;font-size:9px;color:var(--text3)}
 .explorer-folder-name{flex:1;font-size:12px;font-weight:700;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .explorer-folder-progress{font-size:10px;color:var(--text3)}
+.explorer-folder-progress-row{display:flex;align-items:center;gap:8px;padding:0 10px 8px 36px;cursor:pointer}
+.explorer-folder-progress-track{height:4px;background:#e5e4df;border-radius:4px;overflow:hidden;flex:1}
+.explorer-folder-progress-fill{height:100%;border-radius:4px;transition:width .25s}
+.explorer-folder-progress-count{font-size:9px;color:var(--text3);min-width:58px;text-align:right}
 .explorer-folder-body{padding:4px 5px 6px}
 .explorer-task-children{margin-left:22px;border-left:1px solid var(--border);padding-left:5px}
 .task-status-pill{font-size:10px;padding:2px 6px;border-radius:8px;white-space:nowrap;background:#eee;color:var(--text2)}
@@ -568,7 +577,10 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
       <button class="ntab" onclick="switchTab('weekly')">위클리</button>
       <button class="ntab" onclick="switchTab('report')">리포트</button>
     </div>
-    <div class="proj-filter" id="proj-filter"></div>
+    <div class="global-directory-filter" id="global-directory-filter">
+      <div class="proj-filter" id="proj-filter"></div>
+      <div class="global-sub-filter" id="global-proj-subfilter"></div>
+    </div>
     <button class="btn-new" onclick="openNewTask()">+ 새 작업</button>
   </div>
 
@@ -1479,7 +1491,9 @@ async function migrateToTasksCalendar(){
 
 function getProj(id){ return getProjDisplay(id); }
 
-function rootTasks(){return tasks.filter(t=>!t.parentId&&(!selProjId||t.projId===selProjId));}
+function selectedProjectIds(){return selProjId===null?null:[selProjId,...projAllDescendantProjects(selProjId).map(p=>p.id)];}
+function taskMatchesSelectedProject(t){const ids=selectedProjectIds();return !ids||ids.includes(t.projId);}
+function rootTasks(){return tasks.filter(t=>!t.parentId&&taskMatchesSelectedProject(t));}
 function childTasks(pid){return tasks.filter(t=>t.parentId===pid);}
 function allDescendants(id){let res=[];const ch=childTasks(id);ch.forEach(c=>{res.push(c);res=res.concat(allDescendants(c.id));});return res;}
 function calcProgress(id){const ch=childTasks(id);if(!ch.length)return null;const done=ch.filter(c=>c.status==='done').length;return{done,total:ch.length,pct:Math.round(done/ch.length*100)};}
@@ -1501,7 +1515,7 @@ function switchTab(tab){
   document.querySelectorAll('.view').forEach(el=>el.classList.remove('active'));
   const viewEl=document.getElementById('view-'+tab);
   if(viewEl) viewEl.classList.add('active');
-  document.getElementById('proj-filter').style.display=['board','list','cal','daily','weekly'].includes(tab)?'flex':'none';
+  document.getElementById('global-directory-filter').style.display=['board','list','cal','daily','weekly'].includes(tab)?'flex':'none';
   renderAll();
 }
 
@@ -1509,15 +1523,32 @@ function renderAll(){renderProjFilter();renderStats();renderBoard();renderTree()
 
 // ── Proj Filter ───────────────────────────────────────────
 function renderProjFilter(){
+  const roots=sortProjects(projects.filter(p=>!p.parentId));
+  let activeRoot=null;
+  if(selProjId!==null){
+    activeRoot=projects.find(p=>p.id===selProjId)||null;
+    while(activeRoot?.parentId)activeRoot=projects.find(p=>p.id===activeRoot.parentId)||activeRoot;
+  }
   document.getElementById('proj-filter').innerHTML=
     `<button class="pchip" onclick="setFilter(null)" style="${selProjId===null?'border-width:2px;border-color:#555;font-weight:600':''}">전체</button>`+
-    projects.map(p=>`<button class="pchip" onclick="setFilter(${p.id})" style="${selProjId===p.id?'border-width:2px;border-color:'+p.color+';font-weight:600':''}"><span class="pchip-dot" style="background:${p.color}"></span>${esc(p.name)}</button>`).join('');
+    roots.map(p=>{
+      const disp=getProjDisplay(p.id),active=activeRoot?.id===p.id;
+      return`<button class="pchip" onclick="setFilter(${p.id})" style="${active?'border-width:2px;border-color:'+disp.color+';font-weight:700;color:'+disp.color:''}"><span class="pchip-dot" style="background:${disp.color}"></span>${esc(p.name)}</button>`;
+    }).join('');
+  const sub=document.getElementById('global-proj-subfilter');
+  function childChips(parentId,depth){
+    return projChildProjects(parentId).map(p=>{
+      const disp=getProjDisplay(p.id),active=selProjId===p.id;
+      return`<button class="pchip" onclick="setFilter(${p.id})" style="${active?'border-width:2px;border-color:'+disp.color+';font-weight:700;color:'+disp.color:''}">${depth?'↳ ':''}${esc(p.name)}</button>`+childChips(p.id,depth+1);
+    }).join('');
+  }
+  if(sub)sub.innerHTML=activeRoot?childChips(activeRoot.id,0):'';
 }
 function setFilter(id){selProjId=id;renderAll();}
 
 // ── Stats ─────────────────────────────────────────────────
 function renderStats(){
-  const ft=tasks.filter(t=>!selProjId||t.projId===selProjId);
+  const ft=tasks.filter(taskMatchesSelectedProject);
   const c={todo:0,doing:0,review:0,done:0};ft.forEach(t=>c[t.status]=(c[t.status]||0)+1);
   document.getElementById('stats').innerHTML=`
     <div class="stat"><div class="stat-n">${ft.length}</div><div class="stat-l">전체</div></div>
@@ -1528,7 +1559,7 @@ function renderStats(){
 
 // ── Board ─────────────────────────────────────────────────
 function renderBoard(){
-  const ft=tasks.filter(t=>!t.parentId&&(!selProjId||t.projId===selProjId));
+  const ft=tasks.filter(t=>!t.parentId&&taskMatchesSelectedProject(t));
   document.getElementById('board').innerHTML=Object.entries(COLS).map(([k,v])=>{
     const cards=ft.filter(t=>t.status===k);
     return `<div class="col"><div class="col-head">${v}<span class="col-cnt">${cards.length}</span></div>`+
@@ -1628,12 +1659,18 @@ function renderExplorerProjectFolder(project,availableTasks){
   const collapsed=collapsedExplorerFolders.has(project.id);
   const disp=getProjDisplay(project.id);
   return`<div class="explorer-folder">
-    <div class="explorer-folder-head" onclick="toggleExplorerFolder(${project.id})" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${project.id})">
-      <span class="explorer-folder-arrow">${collapsed?'▶':'▼'}</span><span>${esc(disp.icon||'📁')}</span>
-      <span class="explorer-folder-name" style="color:${disp.color}">${esc(project.name)}</span>
-      ${projectTypeBadge(project)}
-      <span class="explorer-folder-progress">${done}/${folderTasks.length} · ${pct}%</span>
-      <button class="inline-add-btn" onclick="quickAddTaskToProject(${project.id},event)">+ 작업</button>
+    <div class="explorer-folder-summary" ondragover="folderDragOver(event)" ondragleave="folderDragLeave(event)" ondrop="dropTaskIntoProject(event,${project.id})">
+      <div class="explorer-folder-head" onclick="toggleExplorerFolder(${project.id})">
+        <span class="explorer-folder-arrow">${collapsed?'▶':'▼'}</span><span>${esc(disp.icon||'📁')}</span>
+        <span class="explorer-folder-name" style="color:${disp.color}">${esc(project.name)}</span>
+        ${projectTypeBadge(project)}
+        <span class="explorer-folder-progress">${folderTasks.length}개 · ${pct}%</span>
+        <button class="inline-add-btn" onclick="quickAddTaskToProject(${project.id},event)">+ 작업</button>
+      </div>
+      <div class="explorer-folder-progress-row" onclick="toggleExplorerFolder(${project.id})">
+        <div class="explorer-folder-progress-track"><div class="explorer-folder-progress-fill" style="width:${pct}%;background:${disp.color}"></div></div>
+        <span class="explorer-folder-progress-count">${done}/${folderTasks.length} 완료</span>
+      </div>
     </div>
     <div class="explorer-folder-body" style="display:${collapsed?'none':'block'}">${renderExplorerProjectContents(project,availableTasks)}</div>
   </div>`;
@@ -2017,7 +2054,7 @@ function renderCal(){
   const first=new Date(calYear,calMonth,1).getDay();
   const days=new Date(calYear,calMonth+1,0).getDate();
   const prevDays=new Date(calYear,calMonth,0).getDate();
-  const today=new Date(); const ft=tasks.filter(t=>!selProjId||t.projId===selProjId);
+  const today=new Date(); const ft=tasks.filter(taskMatchesSelectedProject);
   const dayLabels=['일','월','화','수','목','금','토'].map(d=>`<div class="dl">${d}</div>`).join('');
   let html=dayLabels;
   for(let i=0;i<first;i++) html+=`<div class="day om"><div class="dn">${prevDays-first+1+i}</div></div>`;
@@ -2047,7 +2084,7 @@ function renderCal(){
 
   // ── Render task list panel ──
   const monthStr=`${calYear}-${String(calMonth+1).padStart(2,'0')}`;
-  const monthTasks=tasks.filter(t=>t.due&&t.due.startsWith(monthStr)&&(!selProjId||t.projId===selProjId));
+  const monthTasks=tasks.filter(t=>t.due&&t.due.startsWith(monthStr)&&taskMatchesSelectedProject(t));
   monthTasks.sort((a,b)=>(a.due>b.due?1:-1));
 
   const doneTasks=monthTasks.filter(t=>t.status==='done');
@@ -4040,7 +4077,7 @@ function deleteProject(){
 window.addEventListener('resize',()=>requestAnimationFrame(()=>{renderDependencyLines();renderWeeklyDependencyLines();}));
 loadLocal();renderAll();startNotionAutoSync();
 dailyDate=new Date();
-document.getElementById('proj-filter').style.display='flex';
+document.getElementById('global-directory-filter').style.display='flex';
 // 페이지 닫기/새로고침 전 즉시 저장
 window.addEventListener('beforeunload',()=>{
   saveLocal();
