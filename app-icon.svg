@@ -1,0 +1,6 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
+  <rect width="512" height="512" rx="116" fill="#f2f1ed"/>
+  <rect x="38" y="38" width="436" height="436" rx="92" fill="#ffffff" stroke="#dedbd2" stroke-width="8"/>
+  <text x="256" y="242" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="112" font-weight="750" fill="#1a1a18">jido.</text>
+  <text x="256" y="342" text-anchor="middle" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="104" font-weight="750" fill="#378ADD">pm</text>
+</svg>
