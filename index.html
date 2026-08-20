@@ -3245,7 +3245,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
       document.removeEventListener('mouseup',onUp);
       pointerX=up?.clientX??pointerX; pointerY=up?.clientY??pointerY;
       el.style.opacity='1'; el.style.transform='';
-      if(!moved) return;
+      if(!moved){if(ghost)ghost.remove();return;}
       pushUndo();
 
       const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top)||origTop;
