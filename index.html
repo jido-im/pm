@@ -2589,7 +2589,7 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
       el.style.cursor='grab';
       if(ghost) ghost.remove();
 
-      if(!moved) return;
+      if(!moved){if(ghost)ghost.remove();return;}
       pushUndo();
 
       const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top);
@@ -3221,6 +3221,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     const isCmdDrag=e.metaKey||e.ctrlKey;
     const isOptDrag=e.altKey;
     const startX=e.clientX, startY=e.clientY;
+    let pointerX=startX, pointerY=startY;
     const origTop=parseInt(el.style.top);
     let moved=false, ghost=null;
 
@@ -3232,44 +3233,56 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
 
     function onMove(mv){
       moved=true;
+      pointerX=mv.clientX; pointerY=mv.clientY;
       const dy=mv.clientY-startY;
       const newTop=Math.max(0,origTop+dy);
-      if(isCmdDrag||isOptDrag){ if(ghost) ghost.style.top=newTop+'px'; el.style.opacity='0.85'; }
-      else{ el.style.top=newTop+'px'; el.style.opacity='0.7'; }
+      const dx=mv.clientX-startX;
+      if(isCmdDrag||isOptDrag){ if(ghost){ghost.style.top=newTop+'px';ghost.style.transform=`translateX(${dx}px)`;} el.style.opacity='0.85'; }
+      else{ el.style.top=newTop+'px';el.style.transform=`translateX(${dx}px)`;el.style.opacity='0.7'; }
     }
-    function onUp(){
+    function onUp(up){
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
-      el.style.opacity='1';
-      if(ghost) ghost.remove();
+      pointerX=up?.clientX??pointerX; pointerY=up?.clientY??pointerY;
+      el.style.opacity='1'; el.style.transform='';
       if(!moved) return;
       pushUndo();
 
       const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top)||origTop;
+      if(ghost) ghost.remove();
       const newMins=Math.round(targetTop/SLOT_H)*30;
       const newH=Math.floor(newMins/60);
       const newM=newMins%60;
+      const targetCol=[...document.querySelectorAll('#weekly-tl-wrap .weekly-day-col')].find(dayCol=>{
+        const rect=dayCol.getBoundingClientRect();
+        return pointerX>=rect.left&&pointerX<=rect.right&&pointerY>=rect.top&&pointerY<=rect.bottom;
+      });
+      const targetDs=targetCol?.id?.replace(/^wcol-/,'')||ds;
+      const task=tasks.find(task=>task.id===t.id); if(!task){renderWeekly();return;}
 
       if(isCmdDrag){
         // Cmd+drag: 같은 task에 새 날짜 timeLog 추가 (t.due 건드리지 않음)
-        timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        timeLogs.push({id:nextLogId++,taskId:t.id,date:targetDs,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
         showToast('같은 작업에 시간 추가됐어요 +'+fmtMins(t.plannedTime||60));
       } else if(isOptDrag){
         // Option+drag: 이름 같은 완전히 독립된 새 task 생성
         const newTask={
           id:nextTaskId++, name:t.name, parentId:null, projId:t.projId, order:nextTaskOrder(t.projId),
           memo:'', status:'todo', tag:t.tag||'STUDIO', priority:t.priority||'mid',
-          due:'', scheduledDate:ds, plannedTime:t.plannedTime||60, startHour:newH, startMin:newM,
+          due:'', scheduledDate:targetDs, plannedTime:t.plannedTime||60, startHour:newH, startMin:newM,
         };
         tasks.unshift(newTask);
-        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:ds,startHour:newH,startMin:newM,duration:newTask.plannedTime,projId:newTask.projId});
+        timeLogs.push({id:nextLogId++,taskId:newTask.id,date:targetDs,startHour:newH,startMin:newM,duration:newTask.plannedTime,projId:newTask.projId});
         showToast('독립 작업으로 복사됐어요');
       } else {
         // Normal move: 기존 log 날짜 변경
-        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(taskScheduleDate(t)||ds));
-        if(oldLog){ oldLog.startHour=newH; oldLog.startMin=newM; oldLog.date=ds; }
-        else timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
-        t.startHour=newH; t.startMin=newM; t.scheduledDate=ds;
+        const oldLog=t._logId
+          ? timeLogs.find(l=>l.id===t._logId)
+          : timeLogs.find(l=>l.taskId===t.id&&l.date===(taskScheduleDate(task)||ds));
+        if(oldLog){ oldLog.startHour=newH; oldLog.startMin=newM; oldLog.date=targetDs; }
+        else timeLogs.push({id:nextLogId++,taskId:t.id,date:targetDs,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId});
+        task.startHour=newH; task.startMin=newM; task.scheduledDate=targetDs;
+        showToast(targetDs.slice(5).replace('-','/')+' '+fmtHM(newH,newM)+' 로 이동했어요');
       }
       saveLocal();scheduleSave();renderWeekly();renderDaily();
     }
