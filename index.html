@@ -400,10 +400,14 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-now-line{position:absolute;left:0;right:0;height:2px;background:var(--red);z-index:15;pointer-events:none}
 .weekly-now-dot{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--red);z-index:15;transform:translate(-50%,-50%)}
 .weekly-day-col{position:relative;overflow:visible}
-.weekly-block{position:absolute;border-radius:5px;padding:2px 5px;font-size:11px;font-weight:600;overflow:visible;z-index:5;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,.1);user-select:none}
+.weekly-block{position:absolute;border-radius:5px;padding:2px 5px;font-size:11px;font-weight:600;overflow:visible;z-index:5;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,.1);user-select:none;transition:width .14s ease,left .14s ease,box-shadow .14s ease}
 .weekly-block-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px}
 .weekly-block-time{font-size:9px;opacity:.75}
 .weekly-block-resize{position:absolute;bottom:-3px;left:0;right:0;height:16px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.25));border-radius:0 0 5px 5px;z-index:10}
+.weekly-block.compact-overlap{box-shadow:-2px 1px 4px rgba(0,0,0,.17)}
+.weekly-block.compact-overlap:hover,.weekly-block.compact-overlap.actions-visible{left:2px!important;width:calc(100% - 4px)!important;z-index:80!important;box-shadow:0 5px 16px rgba(0,0,0,.22)}
+.weekly-overlap-count{position:absolute;right:4px;bottom:3px;min-width:20px;height:16px;padding:0 5px;border-radius:9px;background:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.12);pointer-events:none}
+.weekly-block:hover .weekly-overlap-count,.weekly-block.actions-visible .weekly-overlap-count{opacity:0}
 .weekly-block-actions{position:absolute;top:4px;right:4px;display:flex;gap:4px;z-index:40;opacity:0;transform:translateY(-2px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
 .weekly-block:hover .weekly-block-actions,.weekly-block.actions-visible .weekly-block-actions{opacity:1;transform:translateY(0);pointer-events:auto}
 .weekly-block-action{width:17px;height:17px;border:0;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;line-height:1;cursor:pointer;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .12s ease,filter .12s ease}
@@ -3209,20 +3213,28 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   const p=getProj(t.projId);
   const c=colInfo.col||0;
   const total=colInfo.total||1;
+  const isCompact=total>=3;
   const pct=100/total;
   const leftPct=c*pct;
+  const visibleLayer=Math.min(c,4);
+  const stackOffset=visibleLayer*7;
+  const maxStackOffset=Math.min(total-1,4)*7;
 
   const el=document.createElement('div');
-  el.className='weekly-block';
+  el.className='weekly-block'+(isCompact?' compact-overlap':'');
   el.id='wb-'+t.id;
   el.dataset.taskId=t.id;
-  el.style.cssText=`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};overflow:visible;position:absolute`;
+  el.style.cssText=isCompact
+    ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${p.color}ee;border:1.5px solid ${p.color};color:#fff;overflow:visible;position:absolute;z-index:${6+c}`
+    :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};overflow:visible;position:absolute`;
+  el.title=`${t.name}\n${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}${isCompact?` · ${total}개 일정 겹침`:''}`;
 
   el.innerHTML=`
     <button class="weekly-link-handle input" aria-label="${esc(t.name)}에 선행 작업 연결" ondragover="dependencyDragOver(event)" ondragleave="dependencyDragLeave(event)" ondrop="dropDependency(event,${t.id})" onclick="event.stopPropagation()"></button>
     <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
     <div class="weekly-block-name" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
     <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
+    ${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}
     <div class="weekly-block-actions" aria-label="블록 작업">
       <button class="weekly-block-action complete" onclick="completeWeeklyTask(${t.id},event)" title="완료" aria-label="${esc(t.name)} 완료">✓</button>
       <button class="weekly-block-action delete" onclick="deleteWeeklyTask(${t.id},event)" title="삭제" aria-label="${esc(t.name)} 삭제">×</button>
@@ -3345,13 +3357,21 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
   const color=e._calColor||'#4285f4';
   const c=colInfo.col||0;
   const total=colInfo.total||1;
+  const isCompact=total>=3;
   const pct=100/total;
   const leftPct=c*pct;
+  const visibleLayer=Math.min(c,4);
+  const stackOffset=visibleLayer*7;
+  const maxStackOffset=Math.min(total-1,4)*7;
 
   const el=document.createElement('div');
-  el.className='weekly-block';
-  el.style.cssText=`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${color}22;border-left:3px solid ${color};color:${color};cursor:default;pointer-events:none`;
-  el.innerHTML=`<div class="weekly-block-name">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>`;
+  el.className='weekly-block'+(isCompact?' compact-overlap':'');
+  el.style.cssText=isCompact
+    ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${color}ee;border-left:3px solid ${color};color:#fff;cursor:default;z-index:${6+c}`
+    :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${color}22;border-left:3px solid ${color};color:${color};cursor:default`;
+  el.title=`${e.summary||'(일정)'}\n${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}${isCompact?` · ${total}개 일정 겹침`:''}`;
+  el.innerHTML=`<div class="weekly-block-name">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}`;
+  el.addEventListener('click',event=>event.stopPropagation());
   col.appendChild(el);
 }
 
