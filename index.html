@@ -404,6 +404,14 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-block-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px}
 .weekly-block-time{font-size:9px;opacity:.75}
 .weekly-block-resize{position:absolute;bottom:-3px;left:0;right:0;height:16px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.25));border-radius:0 0 5px 5px;z-index:10}
+.weekly-block-actions{position:absolute;top:4px;right:4px;display:flex;gap:4px;z-index:40;opacity:0;transform:translateY(-2px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
+.weekly-block:hover .weekly-block-actions,.weekly-block.actions-visible .weekly-block-actions{opacity:1;transform:translateY(0);pointer-events:auto}
+.weekly-block-action{width:17px;height:17px;border:0;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:800;line-height:1;cursor:pointer;color:#fff;box-shadow:0 1px 3px rgba(0,0,0,.2);transition:transform .12s ease,filter .12s ease}
+.weekly-block-action:hover{transform:scale(1.12);filter:brightness(.95)}
+.weekly-block-action.complete{background:#34a853}
+.weekly-block-action.delete{background:#ea4335}
+.weekly-block.actions-visible{outline:2px solid currentColor;outline-offset:1px;z-index:18}
+.weekly-block.actions-visible .weekly-block-name{padding-right:46px!important}
 .weekly-link-handle{position:absolute;top:50%;width:13px;height:13px;border:2px solid var(--blue);background:#fff;border-radius:50%;padding:0;transform:translateY(-50%);z-index:30;cursor:crosshair;box-shadow:0 1px 3px rgba(0,0,0,.15)}
 .weekly-link-handle.input{left:-8px;border-color:var(--border2)}
 .weekly-link-handle.output{right:-8px}
@@ -2233,8 +2241,8 @@ function quickToggle(id, e){
   if(e && e.stopPropagation) e.stopPropagation();
   const t=tasks.find(t=>t.id===id);
   if(!t) return;
-  t.status=t.status==='done'?'todo':'done';
   pushUndo();
+  t.status=t.status==='done'?'todo':'done';
   saveLocal();scheduleSave();
   renderDaily();renderWeekly();renderBoard();renderTree();renderStats();renderProjFilter();
 }
@@ -2737,6 +2745,7 @@ document.addEventListener('keydown',e=>{
 document.addEventListener('click',e=>{
   // Deselect block if clicking outside
   if(!e.target.closest('.tl-block')){ document.querySelectorAll('.tl-block.selected').forEach(el=>el.classList.remove('selected')); selectedBlockId=null; }
+  if(!e.target.closest('.weekly-block')) document.querySelectorAll('.weekly-block.actions-visible').forEach(el=>el.classList.remove('actions-visible'));
   hideCtxMenu();
 });
 function selectBlock(id){
@@ -2745,6 +2754,14 @@ function selectBlock(id){
   selectedBlockId=id;
   const el=document.getElementById('tl-block-'+id);
   if(el) el.classList.add('selected');
+}
+function selectWeeklyBlock(id,el){
+  selItems.clear();
+  updateSelectionBar();
+  document.querySelectorAll('.weekly-block.actions-visible').forEach(block=>{if(block!==el)block.classList.remove('actions-visible');});
+  const shouldShow=!el.classList.contains('actions-visible');
+  el.classList.toggle('actions-visible',shouldShow);
+  selectedBlockId=shouldShow?id:null;
 }
 // keyboard+click handled in multi-select block above
 
@@ -2760,6 +2777,7 @@ function showCtxMenu(e,id,type){
   const items=[
     {label:'✏️ 편집',action:()=>{openPanel(id);hideCtxMenu();}},
     {label:'⏰ 시간 설정',action:()=>{openPanel(id);hideCtxMenu();},show:type==='task'},
+    {label:'↩ 일정에서 빼기',action:()=>{unscheduleWeeklyTask(id);hideCtxMenu();},show:type==='block'},
     {label:t?.status==='done'?'↩️ 미완료로':'✅ 완료',action:()=>{quickToggle(id,{stopPropagation:()=>{}});hideCtxMenu();}},
     {label:'🗑️ 삭제',danger:true,action:()=>{quickDeleteTask(id);hideCtxMenu();}},
   ].filter(i=>i.show!==false);
@@ -2928,7 +2946,9 @@ function getWeekDates(){
   return Array.from({length:7},(_,i)=>{ const d=new Date(monday); d.setDate(monday.getDate()+i); return d; });
 }
 
-function renderWeekly(){
+function renderWeekly(preserveScroll=false){
+  const previousWrap=document.getElementById('weekly-tl-wrap');
+  const previousScrollTop=preserveScroll&&previousWrap?previousWrap.scrollTop:null;
   const dates=getWeekDates();
   const startStr=`${dates[0].getMonth()+1}/${dates[0].getDate()}`;
   const endStr=`${dates[6].getMonth()+1}/${dates[6].getDate()}`;
@@ -3178,7 +3198,7 @@ function renderWeekly(){
   requestAnimationFrame(renderWeeklyDependencyLines);
 
   // Scroll to 8am or now
-  setTimeout(()=>{ if(wrap) wrap.scrollTop=minsToTop(8*60); },50);
+  setTimeout(()=>{ if(wrap) wrap.scrollTop=previousScrollTop===null?minsToTop(8*60):previousScrollTop; },50);
 }
 
 function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
@@ -3203,7 +3223,10 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
     <div class="weekly-block-name" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
     <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
-    <button class="weekly-unschedule-btn" onclick="unscheduleWeeklyTask(${t.id},event)" title="일정에서 빼기">×</button>
+    <div class="weekly-block-actions" aria-label="블록 작업">
+      <button class="weekly-block-action complete" onclick="completeWeeklyTask(${t.id},event)" title="완료" aria-label="${esc(t.name)} 완료">✓</button>
+      <button class="weekly-block-action delete" onclick="deleteWeeklyTask(${t.id},event)" title="삭제" aria-label="${esc(t.name)} 삭제">×</button>
+    </div>
     <div class="weekly-block-resize" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;border-radius:0 0 4px 4px"></div>
     <button class="weekly-link-handle output" draggable="true" aria-label="${esc(t.name)}에서 후행 작업 연결 시작" ondragstart="startDependencyDrag(event,${t.id})" ondragend="window._dependencySource=null" onclick="event.stopPropagation()"></button>
   `;
@@ -3212,7 +3235,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
 
   // ── Mouse drag: normal=move, Cmd=add log, Option=copy ──
   el.addEventListener('mousedown', e=>{
-    if(e.target.classList.contains('weekly-block-resize')||e.target.classList.contains('weekly-block-top-handle')||e.target.closest('.weekly-link-handle')||e.target.closest('.weekly-unschedule-btn')) return;
+    if(e.target.classList.contains('weekly-block-resize')||e.target.classList.contains('weekly-block-top-handle')||e.target.closest('.weekly-link-handle')||e.target.closest('.weekly-block-actions')) return;
     e.preventDefault();
     e.stopPropagation();
     const isCmdDrag=e.metaKey||e.ctrlKey;
@@ -3281,13 +3304,13 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
         task.startHour=newH; task.startMin=newM; task.scheduledDate=targetDs;
         showToast(targetDs.slice(5).replace('-','/')+' '+fmtHM(newH,newM)+' 로 이동했어요');
       }
-      saveLocal();scheduleSave();renderWeekly();renderDaily();
+      saveLocal();scheduleSave();renderWeekly(true);renderDaily();
     }
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
   });
 
-  el.addEventListener('click',e=>{e.stopPropagation();toggleSelect(t.id,'cal');});
+  el.addEventListener('click',e=>{e.stopPropagation();selectWeeklyBlock(t.id,el);});
   el.addEventListener('dblclick',e=>{e.stopPropagation();openPanel(t.id);});
   el.addEventListener('contextmenu',e=>{e.preventDefault();e.stopPropagation();showCtxMenu(e,t.id,'block');});
 
@@ -3295,13 +3318,13 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   const resizeHandle=el.querySelector('.weekly-block-resize');
   resizeHandle.addEventListener('mousedown',e=>{
     e.stopPropagation();e.preventDefault();
-    startWeeklyResize(e,t.id,el,'bottom',ds);
+    startWeeklyResize(e,t.id,el,'bottom',ds,t._logId,t.startHour,t.startMin,t.plannedTime);
   });
   // ── Top resize ──
   const topHandle=el.querySelector('.weekly-block-top-handle');
   topHandle.addEventListener('mousedown',e=>{
     e.stopPropagation();e.preventDefault();
-    startWeeklyResize(e,t.id,el,'top',ds);
+    startWeeklyResize(e,t.id,el,'top',ds,t._logId,t.startHour,t.startMin,t.plannedTime);
   });
 
   col.appendChild(el);
@@ -3332,19 +3355,23 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
   col.appendChild(el);
 }
 
-function startWeeklyResize(e, taskId, el, direction='bottom', ds=null){
+function startWeeklyResize(e, taskId, el, direction='bottom', ds=null, logId=null, blockHour=null, blockMin=null, blockDuration=null){
   const startY=e.clientY;
   const t=tasks.find(t=>t.id===taskId); if(!t) return;
-  const origDur=t.plannedTime||60;
-  const origH=t.startHour||0;
-  const origM=t.startMin||0;
+  const origDur=blockDuration||t.plannedTime||60;
+  const origH=blockHour??t.startHour??0;
+  const origM=blockMin??t.startMin??0;
   const origMins=origH*60+origM;
   const date=ds||dailyDateStr(dailyDate);
+  const wrap=document.getElementById('weekly-tl-wrap');
+  const startScrollTop=wrap?.scrollTop||0;
+  let lastClientY=startY;
   let curDur=origDur;
   let curMins=origMins;
 
   function onMove(ev){
-    const dy=ev.clientY-startY;
+    lastClientY=ev.clientY;
+    const dy=(lastClientY-startY)+((wrap?.scrollTop||0)-startScrollTop);
     if(direction==='bottom'){
       curDur=Math.max(30,Math.round((origDur+dy/SLOT_H*30)/30)*30);
       el.style.height=Math.max(22,(curDur/30)*SLOT_H)+'px';
@@ -3360,9 +3387,11 @@ function startWeeklyResize(e, taskId, el, direction='bottom', ds=null){
     const timeEl=el.querySelector('.weekly-block-time');
     if(timeEl) timeEl.textContent=fmtHM(displayH,displayM)+' · '+fmtMins(curDur);
   }
+  function onScroll(){onMove({clientY:lastClientY});}
   function onUp(){
     document.removeEventListener('mousemove',onMove);
     document.removeEventListener('mouseup',onUp);
+    wrap?.removeEventListener('scroll',onScroll);
     pushUndo();
     // onUp에서만 task 데이터 확정
     t.plannedTime=curDur;
@@ -3370,18 +3399,39 @@ function startWeeklyResize(e, taskId, el, direction='bottom', ds=null){
       t.startHour=Math.floor(curMins/60);
       t.startMin=curMins%60;
     }
-    const lg=timeLogs.find(l=>l.taskId===taskId&&l.date===date);
-    if(lg){lg.startHour=t.startHour;lg.startMin=t.startMin||0;lg.duration=t.plannedTime;}
-    else{timeLogs.push({id:nextLogId++,taskId,date,startHour:t.startHour,startMin:t.startMin||0,duration:t.plannedTime,projId:t.projId});}
-    saveLocal();scheduleSave();renderWeekly();renderDaily();
+    const lg=logId?timeLogs.find(l=>l.id===logId):timeLogs.find(l=>l.taskId===taskId&&l.date===date);
+    const finalMins=direction==='top'?curMins:origMins;
+    const finalHour=Math.floor(finalMins/60),finalMin=finalMins%60;
+    if(lg){lg.startHour=finalHour;lg.startMin=finalMin;lg.duration=curDur;}
+    else{timeLogs.push({id:nextLogId++,taskId,date,startHour:finalHour,startMin:finalMin,duration:curDur,projId:t.projId});}
+    saveLocal();scheduleSave();renderWeekly(true);renderDaily();
   }
   document.addEventListener('mousemove',onMove);
   document.addEventListener('mouseup',onUp);
+  wrap?.addEventListener('scroll',onScroll,{passive:true});
 }
 
 
 function weeklyDayDragOver(e){e.preventDefault();e.stopPropagation();e.currentTarget.classList.add('drag-over');}
 function weeklyDayDragLeave(e){e.currentTarget.classList.remove('drag-over');}
+function completeWeeklyTask(id,e){
+  e?.preventDefault();e?.stopPropagation();
+  const t=tasks.find(task=>task.id===id);if(!t)return;
+  pushUndo();
+  t.status='done';
+  selectedBlockId=null;
+  saveLocal();scheduleSave();renderWeekly(true);renderDaily();renderBoard();renderTree();renderStats();renderProjFilter();
+  showToast('완료했어요 ✓');
+}
+function deleteWeeklyTask(id,e){
+  e?.preventDefault();e?.stopPropagation();
+  const t=tasks.find(task=>task.id===id);if(!t)return;
+  showConfirm('“'+t.name+'” 작업을 삭제할까요?').then(ok=>{
+    if(!ok)return;
+    quickDeleteTask(id);
+    selectedBlockId=null;
+  });
+}
 function handleWeeklyDayDrop(e,ds){
   e.preventDefault();e.stopPropagation();
   e.currentTarget.classList.remove('drag-over');
