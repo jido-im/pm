@@ -406,6 +406,7 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-block-resize{position:absolute;bottom:-3px;left:0;right:0;height:16px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.25));border-radius:0 0 5px 5px;z-index:10}
 .weekly-block.compact-overlap{box-shadow:-2px 1px 4px rgba(0,0,0,.17)}
 .weekly-block.compact-overlap:hover,.weekly-block.compact-overlap.actions-visible{left:2px!important;width:calc(100% - 4px)!important;z-index:80!important;box-shadow:0 5px 16px rgba(0,0,0,.22)}
+.weekly-block.weekly-gcal-block.compact-overlap:hover{z-index:25!important}
 .weekly-overlap-count{position:absolute;right:4px;bottom:3px;min-width:20px;height:16px;padding:0 5px;border-radius:9px;background:rgba(255,255,255,.92);display:flex;align-items:center;justify-content:center;font-size:9px;font-weight:800;line-height:1;box-shadow:0 1px 3px rgba(0,0,0,.12);pointer-events:none}
 .weekly-block:hover .weekly-overlap-count,.weekly-block.actions-visible .weekly-overlap-count{opacity:0}
 .weekly-block-actions{position:absolute;top:4px;right:4px;display:flex;gap:4px;z-index:40;opacity:0;transform:translateY(-2px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
@@ -2495,7 +2496,9 @@ function renderDailyTimeline(ds, dayTasks){
 }
 
 function computeColumns(tasks){
-  // Assign column index to each task to avoid overlap
+  // Assign a lane to every block, then give the whole connected overlap group
+  // one shared lane count. A long event can bridge several shorter events; if
+  // each block calculates its own width, later blocks can slip underneath it.
   const sorted=[...tasks].sort((a,b)=>{
     const aS=(a.startHour||0)*60+(a.startMin||0);
     const bS=(b.startHour||0)*60+(b.startMin||0);
@@ -2509,21 +2512,24 @@ function computeColumns(tasks){
     let col=0;
     while(colEnds[col]!==undefined && colEnds[col]>s) col++;
     colEnds[col]=e;
-    cols[t.id]={col, colEnds};
+    cols[t.id]={col,total:1};
   });
-  // Calculate total columns per task (how many cols overlap)
+
+  let group=[];
+  let groupEnd=-1;
+  const finishGroup=()=>{
+    if(!group.length) return;
+    const total=Math.max(...group.map(t=>cols[t.id].col))+1;
+    group.forEach(t=>{cols[t.id].total=total;});
+  };
   sorted.forEach(t=>{
     const s=(t.startHour||0)*60+(t.startMin||0);
     const e=s+(t.plannedTime||60);
-    let maxCol=cols[t.id].col;
-    sorted.forEach(u=>{
-      if(u.id===t.id) return;
-      const us=(u.startHour||0)*60+(u.startMin||0);
-      const ue=us+(u.plannedTime||60);
-      if(us<e && ue>s) maxCol=Math.max(maxCol, cols[u.id].col);
-    });
-    cols[t.id].total=maxCol+1;
+    if(group.length&&s>=groupEnd){finishGroup();group=[];groupEnd=-1;}
+    group.push(t);
+    groupEnd=Math.max(groupEnd,e);
   });
+  finishGroup();
   return cols;
 }
 
@@ -3242,8 +3248,8 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   el.id='wb-'+t.id;
   el.dataset.taskId=t.id;
   el.style.cssText=isCompact
-    ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${p.color}ee;border:1.5px solid ${p.color};color:#fff;overflow:visible;position:absolute;z-index:${6+c}`
-    :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};overflow:visible;position:absolute`;
+    ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${p.color}ee;border:1.5px solid ${p.color};color:#fff;overflow:visible;position:absolute;z-index:${30+c}`
+    :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};overflow:visible;position:absolute;z-index:${30+c}`;
   el.title=`${t.name}\n${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}${isCompact?` · ${total}개 일정 겹침`:''}`;
 
   el.innerHTML=`
@@ -3382,10 +3388,10 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
   const maxStackOffset=Math.min(total-1,4)*7;
 
   const el=document.createElement('div');
-  el.className='weekly-block'+(isCompact?' compact-overlap':'');
+  el.className='weekly-block weekly-gcal-block'+(isCompact?' compact-overlap':'');
   el.style.cssText=isCompact
-    ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${color}ee;border-left:3px solid ${color};color:#fff;cursor:default;z-index:${6+c}`
-    :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${color}22;border-left:3px solid ${color};color:${color};cursor:default`;
+    ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${color}b8;border-left:3px solid ${color};color:#fff;cursor:default;z-index:${5+c}`
+    :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${color}22;border-left:3px solid ${color};color:${color};cursor:default;z-index:${5+c}`;
   el.title=`${e.summary||'(일정)'}\n${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}${isCompact?` · ${total}개 일정 겹침`:''}`;
   el.innerHTML=`<div class="weekly-block-name">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}`;
   el.addEventListener('click',event=>event.stopPropagation());
