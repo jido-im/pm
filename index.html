@@ -1253,6 +1253,8 @@ function isTokenValid(){
 })();
 let _tokenClient=null;
 async function _onSignedIn(token){
+  // OAuth 팝업이 닫히며 남은 클릭이 위클리 빈칸으로 전달되지 않도록 잠시 생성 잠금
+  window._weeklyCreateBlockedUntil=Date.now()+5000;
   accessToken=token;
   tokenExpiry=Date.now() + 55*60*1000; // 55분 (토큰 유효기간 60분)
   sessionStorage.setItem('jido_token',token);
@@ -1263,6 +1265,7 @@ async function _onSignedIn(token){
   setSyncStatus('syncing','동기화 중...');
   await loadFromDrive();
   await fetchGcalEvents();
+  window._weeklyCreateBlockedUntil=Date.now()+1200;
   // Auto-refresh token every 45 min (token lasts 60 min)
   setTimeout(()=>_refreshToken(),45*60*1000);
 }
@@ -1280,6 +1283,7 @@ function _refreshToken(){
 }
 function signIn(){
   if(typeof google==='undefined'){showToast('잠시 후 다시 시도해주세요');return;}
+  window._weeklyCreateBlockedUntil=Date.now()+10000;
   google.accounts.oauth2.initTokenClient({client_id:CLIENT_ID,scope:SCOPES,callback:async(res)=>{
     if(res.error){showToast('로그인 실패');return;}
     // Save email hint for auto-restore
@@ -3595,6 +3599,7 @@ function handleWeeklyColDrop(e, ds){
 }
 
 function handleWeeklyColClick(e, ds){
+  if(Date.now()<(window._weeklyCreateBlockedUntil||0))return;
   if(window._weeklyMarqueeConsumed){window._weeklyMarqueeConsumed=false;return;}
   if(window._dragId){window._dragId=null;return;}
   if(e.target.closest('.weekly-block')) return;
@@ -4365,11 +4370,13 @@ if('serviceWorker' in navigator)navigator.serviceWorker.register('./sw.js').catc
     return;
   }
   if(accessToken && isTokenValid()){
+    window._weeklyCreateBlockedUntil=Date.now()+5000;
     document.getElementById('btn-signin').style.display='none';
     document.getElementById('btn-signout').style.display='';
     setSyncStatus('syncing','동기화 중...');
     await loadFromDrive();
     await fetchGcalEvents();
+    window._weeklyCreateBlockedUntil=Date.now()+1200;
     renderAll();
   }
 })();
