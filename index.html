@@ -1861,14 +1861,14 @@ function startDependencyPointer(e,sourceId){
   let lastTargetId=null;
   function move(ev){
     const under=document.elementFromPoint(ev.clientX,ev.clientY);
-    const hit=under?.closest?.('.task-link-handle.input');
+    const hit=under?.closest?.('.task-link-handle.input,.weekly-link-handle.input');
     const row=under?.closest?.('.task-list-item[data-id]');
     const candidateId=parseInt(hit?.dataset.dependencyTarget||row?.dataset.id);
     lastTargetId=candidateId&&candidateId!==sourceId?candidateId:null;
-    document.querySelectorAll('.task-link-handle.input.drag-target').forEach(el=>el.classList.remove('drag-target'));
+    document.querySelectorAll('.task-link-handle.input.drag-target,.weekly-link-handle.input.drag-target').forEach(el=>el.classList.remove('drag-target'));
     document.querySelectorAll('.task-list-item.dependency-drop-target').forEach(el=>el.classList.remove('dependency-drop-target'));
     if(lastTargetId){
-      document.querySelector(`.task-link-handle.input[data-dependency-target="${lastTargetId}"]`)?.classList.add('drag-target');
+      document.querySelector(`.task-link-handle.input[data-dependency-target="${lastTargetId}"],.weekly-link-handle.input[data-dependency-target="${lastTargetId}"]`)?.classList.add('drag-target');
       document.querySelector(`.task-list-item[data-id="${lastTargetId}"]`)?.classList.add('dependency-drop-target');
     }
     const bend=Math.max(35,Math.abs(ev.clientX-x1)*.4);
@@ -1878,7 +1878,7 @@ function startDependencyPointer(e,sourceId){
     document.removeEventListener('pointermove',move);
     document.removeEventListener('pointerup',finish);
     document.removeEventListener('pointercancel',cancel);
-    document.querySelectorAll('.task-link-handle.input.drag-target').forEach(el=>el.classList.remove('drag-target'));
+    document.querySelectorAll('.task-link-handle.input.drag-target,.weekly-link-handle.input.drag-target').forEach(el=>el.classList.remove('drag-target'));
     document.querySelectorAll('.task-list-item.dependency-drop-target').forEach(el=>el.classList.remove('dependency-drop-target'));
     svg.remove();
     const targetId=lastTargetId;
@@ -1887,7 +1887,7 @@ function startDependencyPointer(e,sourceId){
   }
   function cancel(){
     document.removeEventListener('pointermove',move);document.removeEventListener('pointerup',finish);document.removeEventListener('pointercancel',cancel);
-    document.querySelectorAll('.task-link-handle.input.drag-target').forEach(el=>el.classList.remove('drag-target'));
+    document.querySelectorAll('.task-link-handle.input.drag-target,.weekly-link-handle.input.drag-target').forEach(el=>el.classList.remove('drag-target'));
     document.querySelectorAll('.task-list-item.dependency-drop-target').forEach(el=>el.classList.remove('dependency-drop-target'));
     svg.remove();window._dependencySource=null;
   }
@@ -3314,7 +3314,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   el.title=`${t.name}\n${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}${isCompact?` · ${total}개 일정 겹침`:''}`;
 
   el.innerHTML=`
-    <button class="weekly-link-handle input" aria-label="${esc(t.name)}에 선행 작업 연결" ondragover="dependencyDragOver(event)" ondragleave="dependencyDragLeave(event)" ondrop="dropDependency(event,${t.id})" onclick="event.stopPropagation()"></button>
+    <button class="weekly-link-handle input" data-dependency-target="${t.id}" aria-label="${esc(t.name)}에 선행 작업 연결" ondragover="dependencyDragOver(event)" ondragleave="dependencyDragLeave(event)" ondrop="dropDependency(event,${t.id})" onclick="event.stopPropagation()"></button>
     <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
     <div class="weekly-block-name" data-title="${esc(t.name)}" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
     <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
@@ -3324,7 +3324,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
       <button class="weekly-block-action delete" onclick="deleteWeeklyTask(${t.id},event)" title="삭제" aria-label="${esc(t.name)} 삭제">×</button>
     </div>
     <div class="weekly-block-resize" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;border-radius:0 0 4px 4px"></div>
-    <button class="weekly-link-handle output" draggable="true" aria-label="${esc(t.name)}에서 후행 작업 연결 시작" ondragstart="startDependencyDrag(event,${t.id})" ondragend="window._dependencySource=null" onclick="event.stopPropagation()"></button>
+    <button class="weekly-link-handle output" aria-label="${esc(t.name)}에서 후행 작업 연결 시작" onpointerdown="startDependencyPointer(event,${t.id})" onclick="event.stopPropagation()"></button>
   `;
 
   const ds=dailyDateStr(col._date||new Date());
