@@ -401,7 +401,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-now-dot{position:absolute;width:8px;height:8px;border-radius:50%;background:var(--red);z-index:15;transform:translate(-50%,-50%)}
 .weekly-day-col{position:relative;overflow:visible}
 .weekly-block{position:absolute;border-radius:5px;padding:2px 5px;font-size:11px;font-weight:600;overflow:visible;z-index:5;cursor:grab;box-shadow:0 1px 3px rgba(0,0,0,.1);user-select:none;transition:width .14s ease,left .14s ease,box-shadow .14s ease}
-.weekly-block-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11px}
+.weekly-block-name{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;white-space:normal;overflow:hidden;overflow-wrap:anywhere;line-height:1.22;font-size:11px}
+.weekly-block.short-title .weekly-block-name{-webkit-line-clamp:1}
+.weekly-block:hover .weekly-block-name[data-title]::after{content:attr(data-title);position:absolute;left:3px;top:0;transform:translateY(calc(-100% - 5px));width:max-content;max-width:220px;padding:6px 8px;border-radius:7px;background:#1a1a18;color:#fff;font-size:11px;font-weight:650;line-height:1.35;white-space:normal;overflow-wrap:anywhere;box-shadow:0 4px 14px rgba(0,0,0,.22);z-index:100;pointer-events:none}
 .weekly-block-time{font-size:9px;opacity:.75}
 .weekly-block-resize{position:absolute;bottom:-3px;left:0;right:0;height:16px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.25));border-radius:0 0 5px 5px;z-index:10}
 .weekly-block.compact-overlap{box-shadow:-2px 1px 4px rgba(0,0,0,.17)}
@@ -3244,7 +3246,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   const maxStackOffset=Math.min(total-1,4)*7;
 
   const el=document.createElement('div');
-  el.className='weekly-block'+(isCompact?' compact-overlap':'');
+  el.className='weekly-block'+(isCompact?' compact-overlap':'')+(height<52?' short-title':'');
   el.id='wb-'+t.id;
   el.dataset.taskId=t.id;
   el.style.cssText=isCompact
@@ -3255,7 +3257,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   el.innerHTML=`
     <button class="weekly-link-handle input" aria-label="${esc(t.name)}에 선행 작업 연결" ondragover="dependencyDragOver(event)" ondragleave="dependencyDragLeave(event)" ondrop="dropDependency(event,${t.id})" onclick="event.stopPropagation()"></button>
     <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
-    <div class="weekly-block-name" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
+    <div class="weekly-block-name" data-title="${esc(t.name)}" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
     <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
     ${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}
     <div class="weekly-block-actions" aria-label="블록 작업">
@@ -3388,12 +3390,12 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
   const maxStackOffset=Math.min(total-1,4)*7;
 
   const el=document.createElement('div');
-  el.className='weekly-block weekly-gcal-block'+(isCompact?' compact-overlap':'');
+  el.className='weekly-block weekly-gcal-block'+(isCompact?' compact-overlap':'')+(height<52?' short-title':'');
   el.style.cssText=isCompact
     ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${color}b8;border-left:3px solid ${color};color:#fff;cursor:default;z-index:${5+c}`
     :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${color}22;border-left:3px solid ${color};color:${color};cursor:default;z-index:${5+c}`;
   el.title=`${e.summary||'(일정)'}\n${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}${isCompact?` · ${total}개 일정 겹침`:''}`;
-  el.innerHTML=`<div class="weekly-block-name">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}`;
+  el.innerHTML=`<div class="weekly-block-name" data-title="📅 ${esc(e.summary||'(일정)')}">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}`;
   el.addEventListener('click',event=>event.stopPropagation());
   col.appendChild(el);
 }
