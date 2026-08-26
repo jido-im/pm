@@ -366,6 +366,9 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-todo-panel .todo-name{white-space:normal;line-height:1.35;overflow-wrap:anywhere}
 .weekly-todo-panel .todo-list{display:flex;flex-direction:column;gap:4px}
 .weekly-todo-panel .remaining-header{margin-top:6px}
+.weekly-todo-panel .todo-item.weekly-completed{opacity:.46;transition:opacity .15s}
+.weekly-todo-panel .todo-item.weekly-completed:hover{opacity:.82}
+.weekly-todo-panel .todo-item.weekly-completed .todo-inner{background:var(--bg)}
 @media(max-width:760px){.weekly-split{grid-template-columns:1fr}.weekly-todo-panel{position:static;max-height:none}}
 .weekly-progress{display:flex;flex-direction:column;gap:6px;margin-bottom:10px}
 .weekly-progress-card{padding:8px;border:1px solid var(--border);border-radius:8px;background:var(--bg);cursor:pointer}
@@ -3037,13 +3040,17 @@ function renderWeekly(preserveScroll=false){
   const weekTasks=tasks.filter(t=>weekStrs.includes(t.due)||isPlannedThisWeek(t)||t.status==='doing');
   const hasWeeklySchedule=t=>!!taskScheduleDate(t);
   const weekInboxTasks=weekTasks.filter(t=>t.status!=='done'&&!hasWeeklySchedule(t));
-  const scheduledWeekTasks=tasks.filter(t=>t.status!=='done'&&weekStrs.includes(taskScheduleDate(t))).sort((a,b)=>{
+  const weeklyTaskSort=(a,b)=>{
     const dateDiff=taskScheduleDate(a).localeCompare(taskScheduleDate(b));
     if(dateDiff) return dateDiff;
     const aM=a.startHour===undefined||a.startHour===null||a.startHour===''?-1:(Number(a.startHour)*60+Number(a.startMin||0));
     const bM=b.startHour===undefined||b.startHour===null||b.startHour===''?-1:(Number(b.startHour)*60+Number(b.startMin||0));
     return aM-bM;
-  });
+  };
+  const scheduledWeekTasks=tasks.filter(t=>t.status!=='done'&&weekStrs.includes(taskScheduleDate(t))).sort(weeklyTaskSort);
+  const completedWeekTasks=tasks.filter(t=>t.status==='done'&&(
+    weekStrs.includes(taskScheduleDate(t))||weekStrs.includes(t.due)||isPlannedThisWeek(t)
+  )).sort(weeklyTaskSort);
   const dueWeekTasks=tasks.filter(t=>weekStrs.includes(t.due)||isPlannedThisWeek(t));
   const progressEl=document.getElementById('weekly-progress');
   if(progressEl){
@@ -3082,12 +3089,13 @@ function renderWeekly(preserveScroll=false){
   function makeWeeklyTodoItem(t, extra=''){
     const projBtns=projects.map(p=>`<div class="todo-swipe-proj" style="background:${p.color}" onclick="assignProj(event,${t.id},${p.id})">${p.icon}</div>`).join('');
     const isRemaining=extra==='remaining';
+    const isCompleted=extra==='completed';
     const scheduleDate=taskScheduleDate(t);
     const scheduleDay=scheduleDate?dates.find(d=>dailyDateStr(d)===scheduleDate):null;
     const isScheduled=!!scheduleDay;
     const hasTime=t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='';
     const scheduleLabel=isScheduled?`${dayNames[scheduleDay.getDay()]} ${hasTime?fmtHM(t.startHour,t.startMin||0):'종일'}`:'';
-    return`<div class="todo-item${isRemaining?' remaining':''}${isScheduled?' scheduled':''}" data-id="${t.id}" draggable="true" ondragstart="onTodoDragStart(event,${t.id})">
+    return`<div class="todo-item${isRemaining?' remaining':''}${isScheduled?' scheduled':''}${isCompleted?' weekly-completed':''}" data-id="${t.id}" draggable="${isCompleted?'false':'true'}" ${isCompleted?'':`ondragstart="onTodoDragStart(event,${t.id})"`}>
       <div class="todo-swipe-right" id="swipe-right-${t.id}">${projBtns}</div>
       <div class="todo-swipe-left" id="swipe-left-${t.id}">🗑 삭제</div>
       <div class="todo-inner" id="todo-inner-${t.id}">
@@ -3121,7 +3129,13 @@ function renderWeekly(preserveScroll=false){
       ${unscheduledTasks.map(t=>makeWeeklyTodoItem(t)).join('')}
     </div>`:'';
 
-  wList.innerHTML=scheduledHtml+weekHtml+remainHtml+unscheduledHtml||'<div class="weekly-empty" style="font-size:12px;color:var(--text3);padding:8px 0;text-align:center">이번 주 작업이 없어요 ✓</div>';
+  const completedHtml=completedWeekTasks.length>0?`
+    <div class="remaining-section weekly-completed-section">
+      <div class="remaining-header">완료 (${completedWeekTasks.length})</div>
+      ${completedWeekTasks.map(t=>makeWeeklyTodoItem(t,'completed')).join('')}
+    </div>`:'';
+
+  wList.innerHTML=scheduledHtml+weekHtml+remainHtml+unscheduledHtml+completedHtml||'<div class="weekly-empty" style="font-size:12px;color:var(--text3);padding:8px 0;text-align:center">이번 주 작업이 없어요 ✓</div>';
   wList.querySelectorAll('.todo-item').forEach(el=>attachSwipe(el));
 
   // ── Weekly timeline: absolute positioning (same as daily) ──
