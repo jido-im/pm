@@ -3357,6 +3357,8 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     const startX=e.clientX, startY=e.clientY;
     let pointerX=startX, pointerY=startY;
     const origTop=parseInt(el.style.top);
+    const dragWrap=document.getElementById('weekly-tl-wrap');
+    const dragStartScrollTop=dragWrap?.scrollTop||0;
     let moved=false, ghost=null;
 
     if(isCmdDrag||isOptDrag){
@@ -3368,8 +3370,8 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     function onMove(mv){
       moved=true;
       pointerX=mv.clientX; pointerY=mv.clientY;
-      const dy=mv.clientY-startY;
-      const newTop=Math.max(0,origTop+dy);
+      const dy=(mv.clientY-startY)+((dragWrap?.scrollTop||0)-dragStartScrollTop);
+      const newTop=Math.max(0,Math.min(24*60/30*SLOT_H-height,origTop+dy));
       const dx=mv.clientX-startX;
       if(isCmdDrag||isOptDrag){ if(ghost){ghost.style.top=newTop+'px';ghost.style.transform=`translateX(${dx}px)`;} el.style.opacity='0.85'; }
       else{ el.style.top=newTop+'px';el.style.transform=`translateX(${dx}px)`;el.style.opacity='0.7'; }
@@ -3377,6 +3379,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     function onUp(up){
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
+      dragWrap?.removeEventListener('scroll',onScroll);
       pointerX=up?.clientX??pointerX; pointerY=up?.clientY??pointerY;
       el.style.opacity='1'; el.style.transform='';
       if(!moved){if(ghost)ghost.remove();return;}
@@ -3430,12 +3433,17 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
           else timeLogs.push({id:nextLogId++,taskId:moveId,date:nextDs,startHour:nextH,startMin:nextM,duration:member.plannedTime||60,projId:member.projId});
           member.startHour=nextH;member.startMin=nextM;member.scheduledDate=nextDs;
         });
-        showToast(moveIds.length>1?moveIds.length+'개 작업을 함께 이동했어요':targetDs.slice(5).replace('-','/')+' '+fmtHM(newH,newM)+' 로 이동했어요');
+        if(moveIds.length>1){
+          selItems.clear();selectedBlockId=null;updateSelectionBar();
+          showToast(moveIds.length+'개 작업을 함께 이동했어요 · 선택 해제');
+        }else showToast(targetDs.slice(5).replace('-','/')+' '+fmtHM(newH,newM)+' 로 이동했어요');
       }
       saveLocal();scheduleSave();renderWeekly(true);renderDaily();
     }
+    function onScroll(){onMove({clientX:pointerX,clientY:pointerY});}
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
+    dragWrap?.addEventListener('scroll',onScroll,{passive:true});
   });
 
   el.addEventListener('click',e=>{e.stopPropagation();selectWeeklyBlock(t.id,el,e);});
