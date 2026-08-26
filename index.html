@@ -364,6 +364,10 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-split{display:grid;grid-template-columns:minmax(300px,350px) minmax(0,1fr);gap:14px;align-items:start}
 .weekly-todo-panel{background:var(--card);border:1px solid var(--border);border-radius:var(--r2);padding:14px;position:sticky;top:10px;max-height:calc(100vh - 160px);overflow-y:auto}
 .weekly-todo-panel .todo-name{white-space:normal;line-height:1.35;overflow-wrap:anywhere}
+.weekly-task-copy{min-width:0;flex:1;display:flex;flex-direction:column;gap:2px;cursor:pointer}
+.weekly-task-meta{display:flex;align-items:center;gap:5px;min-width:0;font-size:10px;color:var(--text3);line-height:1.2}
+.weekly-task-category{max-width:120px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:650}
+.weekly-task-meta-sep{opacity:.5}
 .weekly-todo-panel .todo-list{display:flex;flex-direction:column;gap:4px}
 .weekly-todo-panel .remaining-header{margin-top:6px}
 .weekly-todo-panel .todo-item.weekly-completed{opacity:.46;transition:opacity .15s}
@@ -409,6 +413,8 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .weekly-block.short-title .weekly-block-name{-webkit-line-clamp:1}
 .weekly-block:hover .weekly-block-name[data-title]::after{content:attr(data-title);position:absolute;left:3px;top:0;transform:translateY(calc(-100% - 5px));width:max-content;max-width:220px;padding:6px 8px;border-radius:7px;background:#1a1a18;color:#fff;font-size:11px;font-weight:650;line-height:1.35;white-space:normal;overflow-wrap:anywhere;box-shadow:0 4px 14px rgba(0,0,0,.22);z-index:100;pointer-events:none}
 .weekly-block-time{font-size:9px;opacity:.75}
+.weekly-block-category{padding:1px 5px 0;font-size:8px;font-weight:650;line-height:1.15;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;opacity:.72;pointer-events:none}
+.weekly-block.short-title .weekly-block-category{display:none}
 .weekly-block-resize{position:absolute;bottom:-3px;left:0;right:0;height:16px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.25));border-radius:0 0 5px 5px;z-index:10}
 .weekly-block.compact-overlap{box-shadow:-2px 1px 4px rgba(0,0,0,.17)}
 .weekly-block.compact-overlap:hover,.weekly-block.compact-overlap.actions-visible{left:2px!important;width:calc(100% - 4px)!important;z-index:80!important;box-shadow:0 5px 16px rgba(0,0,0,.22)}
@@ -1044,7 +1050,7 @@ async function flushNotionWrites(){
   }catch(error){
     console.warn('Notion write failed',error);
     setNotionWriteStatus('err','Notion 저장 실패 · 재시도');
-    showToast(error.message||'Notion 저장 실패');
+    showToast('Notion 저장에 실패했어요 · 상단 동기화로 재시도해주세요');
   }finally{
     notionWriteInFlight=false;
   }
@@ -3095,15 +3101,24 @@ function renderWeekly(preserveScroll=false){
     const isScheduled=!!scheduleDay;
     const hasTime=t.startHour!==undefined&&t.startHour!==null&&t.startHour!=='';
     const scheduleLabel=isScheduled?`${dayNames[scheduleDay.getDay()]} ${hasTime?fmtHM(t.startHour,t.startMin||0):'종일'}`:'';
+    const taskProj=getProjDisplay(t.projId);
+    const categoryLabel=`${taskProj.icon||'📁'} ${taskProj.name||'미분류'}`;
+    const dateLabel=isRemaining&&t.due?fmtDate(t.due):'';
     return`<div class="todo-item${isRemaining?' remaining':''}${isScheduled?' scheduled':''}${isCompleted?' weekly-completed':''}" data-id="${t.id}" draggable="${isCompleted?'false':'true'}" ${isCompleted?'':`ondragstart="onTodoDragStart(event,${t.id})"`}>
       <div class="todo-swipe-right" id="swipe-right-${t.id}">${projBtns}</div>
       <div class="todo-swipe-left" id="swipe-left-${t.id}">🗑 삭제</div>
       <div class="todo-inner" id="todo-inner-${t.id}">
         <div class="todo-chk ${t.status==='done'?'done':''}" onclick="quickToggle(${t.id},event)">✓</div>
         <span class="todo-chk-dot" style="width:7px;height:7px;border-radius:50%;background:${getProj(t.projId).color};flex-shrink:0;display:inline-block"></span>
-        <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px" onclick="openPanel(${t.id})">${esc(t.name)}</span>
-        ${scheduleLabel?`<span class="todo-time" title="${scheduleDate}">${scheduleLabel}</span>`:''}
-        ${isRemaining&&t.due?`<span class="remaining-date">${fmtDate(t.due)}</span>`:''}
+        <div class="weekly-task-copy" onclick="openPanel(${t.id})">
+          <span class="todo-name ${t.status==='done'?'done':''}" style="font-size:12px">${esc(t.name)}</span>
+          <div class="weekly-task-meta">
+            <span class="weekly-task-category" style="color:${taskProj.color||'var(--text3)'}">${esc(categoryLabel)}</span>
+            ${scheduleLabel&&categoryLabel?'<span class="weekly-task-meta-sep">·</span>':''}
+            ${scheduleLabel?`<span class="todo-time" title="${scheduleDate}">${scheduleLabel}</span>`:''}
+            ${dateLabel?`<span class="remaining-date">${dateLabel}</span>`:''}
+          </div>
+        </div>
         <button class="todo-more" onclick="showCtxMenu(event,${t.id},'task')">···</button>
       </div>
     </div>`;
@@ -3313,6 +3328,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   const top=minsToTop(startMins);
   const height=Math.max(22,(dur/30)*SLOT_H);
   const p=getProj(t.projId);
+  const projDisplay=getProjDisplay(t.projId);
   const c=colInfo.col||0;
   const total=colInfo.total||1;
   const isCompact=total>=3;
@@ -3336,6 +3352,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     <div class="weekly-block-top-handle" style="position:absolute;top:-3px;left:0;right:0;height:12px;cursor:ns-resize;z-index:11;border-radius:4px 4px 0 0"></div>
     <div class="weekly-block-name" data-title="${esc(t.name)}" style="padding:2px 5px;pointer-events:none">${esc(t.name)}</div>
     <div class="weekly-block-time" style="padding:0 5px;pointer-events:none;font-size:10px;opacity:.75">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
+    <div class="weekly-block-category">${esc((projDisplay.icon||'📁')+' '+(projDisplay.name||'미분류'))}</div>
     ${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}
     <div class="weekly-block-actions" aria-label="블록 작업">
       <button class="weekly-block-action complete" onclick="completeWeeklyTask(${t.id},event)" title="완료" aria-label="${esc(t.name)} 완료">✓</button>
@@ -3387,13 +3404,19 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
 
       const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top)||origTop;
       if(ghost) ghost.remove();
-      const newMins=Math.round(targetTop/SLOT_H)*30;
-      const newH=Math.floor(newMins/60);
-      const newM=newMins%60;
       const targetCol=[...document.querySelectorAll('#weekly-tl-wrap .weekly-day-col')].find(dayCol=>{
         const rect=dayCol.getBoundingClientRect();
         return pointerX>=rect.left&&pointerX<=rect.right&&pointerY>=rect.top&&pointerY<=rect.bottom;
       });
+      // 놓은 포인터의 시간을 블록 시작 시간으로 사용한다. 잡은 지점의 오프셋 때문에
+      // 현재 시간선보다 30~60분 앞에 붙는 현상을 방지한다.
+      const pointerMins=targetCol
+        ?Math.round(topToMins(pointerY-targetCol.getBoundingClientRect().top)/30)*30
+        :Math.round(targetTop/SLOT_H)*30;
+      const maxStart=Math.max(0,24*60-(t.plannedTime||60));
+      const newMins=Math.max(0,Math.min(maxStart,pointerMins));
+      const newH=Math.floor(newMins/60);
+      const newM=newMins%60;
       const targetDs=targetCol?.id?.replace(/^wcol-/,'')||ds;
       const task=tasks.find(task=>task.id===t.id); if(!task){renderWeekly();return;}
 
@@ -3494,7 +3517,7 @@ function renderWeeklyGcalBlock(e, col, colInfo={col:0,total:1}){
     ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${color}b8;border-left:3px solid ${color};color:#fff;cursor:default;z-index:${5+c}`
     :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${color}22;border-left:3px solid ${color};color:${color};cursor:default;z-index:${5+c}`;
   el.title=`${e.summary||'(일정)'}\n${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}${isCompact?` · ${total}개 일정 겹침`:''}`;
-  el.innerHTML=`<div class="weekly-block-name" data-title="📅 ${esc(e.summary||'(일정)')}">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div>${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}`;
+  el.innerHTML=`<div class="weekly-block-name" data-title="📅 ${esc(e.summary||'(일정)')}">📅 ${esc(e.summary||'')}</div><div class="weekly-block-time">${fmtHM(start.getHours(),start.getMinutes())} · ${fmtMins(dur)}</div><div class="weekly-block-category">📅 ${esc(e._calName||'Google Calendar')}</div>${isCompact&&c===total-1?`<span class="weekly-overlap-count">+${total-1}</span>`:''}`;
   el.addEventListener('click',event=>event.stopPropagation());
   col.appendChild(el);
 }
