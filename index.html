@@ -2446,7 +2446,7 @@ function renderDailyTimeline(ds, dayTasks){
         ondragleave="this.querySelector('.tl-slot').classList.remove('drop-target')"
         ondrop="onSlotDrop(event,${h},${half})">
         <div class="tl-hour${half===1?' half-lbl':''}">${hLabel}${half===1?'30':''}</div>
-        <div class="tl-slot" onclick="onSlotClick(${h},${half})"></div>
+        <div class="tl-slot" ondblclick="onSlotClick(${h},${half})" title="더블클릭하여 새 작업 만들기"></div>
       </div>`;
     }
   }
@@ -3237,7 +3237,7 @@ function renderWeekly(preserveScroll=false){
       ondragenter="event.preventDefault()"
       ondragover="event.preventDefault();event.stopPropagation()"
       ondrop="handleWeeklyColDrop(event,'${ds}')"
-      onclick="handleWeeklyColClick(event,'${ds}')">`;
+      ondblclick="handleWeeklyColDoubleClick(event,'${ds}')">`;
 
     // Hour/half grid lines
     for(let h=0;h<24;h++){
@@ -3662,7 +3662,7 @@ function handleWeeklyColDrop(e, ds){
   showToast(fmtHM(t.startHour,t.startMin)+' 로 이동했어요');
 }
 
-function handleWeeklyColClick(e, ds){
+function handleWeeklyColDoubleClick(e, ds){
   if(Date.now()<(window._weeklyCreateBlockedUntil||0))return;
   if(window._weeklyMarqueeConsumed){window._weeklyMarqueeConsumed=false;return;}
   if(window._dragId){window._dragId=null;return;}
@@ -3723,15 +3723,6 @@ function handleWeeklyDrop(e, cell){
   if(!t.plannedTime) t.plannedTime=60;
   saveLocal(); scheduleSave(); renderWeekly(); renderDaily();
   showToast(fmtHM(h,half?30:0)+' 로 이동했어요');
-}
-
-function handleWeeklyCellClick(e, cell){
-  // Only create new task if not coming from a drag
-  if(window._dragId) return;
-  const ds=cell.dataset.ds;
-  const h=parseInt(cell.dataset.h);
-  const half=parseInt(cell.dataset.half);
-  onWeekCellClick(ds,h,half);
 }
 
 // ── Report ────────────────────────────────────────────────
