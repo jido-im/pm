@@ -4,13 +4,15 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="theme-color" content="#f2f1ed">
+<link rel="icon" type="image/png" sizes="192x192" href="./app-icon-192.png?v=3">
+<link rel="shortcut icon" type="image/png" href="./app-icon-192.png?v=3">
 <meta name="application-name" content="jido. pm">
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-title" content="jido. pm">
 <title>jido. pm</title>
 <link rel="icon" type="image/png" sizes="512x512" href="./app-icon-512.png">
-<link rel="apple-touch-icon" href="./app-icon-512.png">
-<link rel="manifest" href="./manifest.webmanifest">
+<link rel="apple-touch-icon" href="./app-icon-512.png?v=3">
+<link rel="manifest" href="./manifest.webmanifest?v=3">
 <link href="https://fonts.googleapis.com/css2?family=Pretendard:wght@400;500;600;700&display=swap" rel="stylesheet">
 <style>
 @font-face {
@@ -2237,8 +2239,9 @@ function renderDaily(){
   const ddEl=document.getElementById('daily-date-label'); if(ddEl) ddEl.textContent=
     d.getFullYear()+'년 '+(d.getMonth()+1)+'월 '+d.getDate()+'일 ('+days[d.getDay()]+')'+(isToday?' — 오늘':'');
 
-  // 오늘(해당일) 작업
-  const dayTasks=tasks.filter(t=>t.due===ds);
+  // 해당 날짜에 마감 또는 실제 배정된 작업. due와 scheduledDate가 달라도
+  // 데일리에서 누락되지 않도록 둘 다 포함한다.
+  const dayTasks=tasks.filter(t=>t.due===ds||taskScheduleDate(t)===ds);
 
   // 미완료 이월 작업: 해당일 이전 날짜이고, 완료 안 됐고, due가 있는 것
   // + 위클리에서 해당 주에 속하지만 특정 날 미배정(due가 이번 주 범위인데 startHour 없는 것)
@@ -2583,11 +2586,15 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
     if(e.target.classList.contains('tl-block-resize')||e.target.classList.contains('tl-block-top-handle')) return;
     e.preventDefault();
     selectBlock(t.id);
-    const isCmdDrag=e.metaKey||e.ctrlKey; // Cmd/Ctrl = add log
-    const isOptDrag=e.altKey;              // Option/Alt = copy task
+    // 실수로 복제되지 않도록 보조 기능은 Shift 조합일 때만 활성화
+    const isCmdDrag=e.shiftKey&&(e.metaKey||e.ctrlKey); // Shift+Cmd/Ctrl = add log
+    const isOptDrag=e.shiftKey&&e.altKey;                // Shift+Option/Alt = copy task
     const startY=e.clientY;
+    let pointerY=startY;
     const origTop=parseInt(el.style.top);
     const ds=dailyDateStr(dailyDate);
+    const dragWrap=document.getElementById('daily-tl-wrap');
+    const dragStartScrollTop=dragWrap?.scrollTop||0;
     let moved=false;
 
     // Visual clone for cmd/opt drag
@@ -2601,9 +2608,11 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
     }
 
     function onMove(mv){
+      pointerY=mv.clientY;
+      const dy=(pointerY-startY)+((dragWrap?.scrollTop||0)-dragStartScrollTop);
+      if(!moved&&Math.abs(dy)<5)return;
       moved=true;
-      const dy=mv.clientY-startY;
-      const newTop=Math.max(0, origTop+dy);
+      const newTop=Math.max(0,Math.min(24*60/30*SLOT_H-height,origTop+dy));
       if(isCmdDrag||isOptDrag){
         // 원본은 그대로, ghost만 이동
         if(ghost) ghost.style.top=newTop+'px';
@@ -2618,6 +2627,8 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
     function onUp(mv){
       document.removeEventListener('mousemove',onMove);
       document.removeEventListener('mouseup',onUp);
+      dragWrap?.removeEventListener('scroll',onScroll);
+      pointerY=mv?.clientY??pointerY;
       el.style.opacity='1';
       el.style.cursor='grab';
       if(ghost) ghost.remove();
@@ -2626,7 +2637,11 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
       pushUndo();
 
       const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top);
-      const newMins=Math.round(targetTop/SLOT_H)*30;
+      // 포인터를 놓은 시간을 시작 시간으로 사용해 잡은 위치에 따른 오차를 없앤다.
+      const bodyRect=container.getBoundingClientRect();
+      const pointerMins=Math.round(topToMins(pointerY-bodyRect.top)/30)*30;
+      const maxStart=Math.max(0,24*60-(t.plannedTime||60));
+      const newMins=Math.max(0,Math.min(maxStart,Number.isFinite(pointerMins)?pointerMins:Math.round(targetTop/SLOT_H)*30));
       const newH=Math.floor(newMins/60);
       const newM=newMins%60;
 
@@ -2656,15 +2671,19 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
         showToast('독립 작업으로 복사됐어요');
       } else {
         // Normal drag: 이동 (기존 날짜 log → 새 날짜로 변경)
-        const oldLog=timeLogs.find(l=>l.taskId===t.id&&l.date===(taskScheduleDate(t)||ds));
+        const oldLog=t._logId
+          ?timeLogs.find(l=>l.id===t._logId)
+          :timeLogs.find(l=>l.taskId===t.id&&l.date===(taskScheduleDate(t)||ds));
         if(oldLog){ oldLog.date=ds; oldLog.startHour=newH; oldLog.startMin=newM; }
         else{ timeLogs.push({id:nextLogId++,taskId:t.id,date:ds,startHour:newH,startMin:newM,duration:t.plannedTime||60,projId:t.projId}); }
         t.startHour=newH; t.startMin=newM; t.scheduledDate=ds;
       }
       saveLocal();scheduleSave();renderDaily();
     }
+    function onScroll(){onMove({clientY:pointerY});}
     document.addEventListener('mousemove',onMove);
     document.addEventListener('mouseup',onUp);
+    dragWrap?.addEventListener('scroll',onScroll,{passive:true});
   });
 
   // ── Click to select / dblclick to open ──
@@ -3013,7 +3032,7 @@ function onTodoEnter(e){
   if(!dailyDate) dailyDate=new Date();
   const ds=dailyDateStr(dailyDate);
   const weekMonday=weekMondayForDate(dailyDate);
-  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:'',plannedWeek:weekMonday,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
+  const newTask={id:nextTaskId++,name,parentId:null,projId:selProjId||projects[0]?.id||1,memo:'',status:'todo',tag:'STUDIO',priority:'mid',due:ds,scheduledDate:ds,plannedWeek:weekMonday,plannedTime:0,order:nextTaskOrder(selProjId||projects[0]?.id||1)};
   pushUndo();
   tasks.unshift(newTask);
   input.value='';
@@ -3742,7 +3761,9 @@ function renderMonthly(){
   for(let d=1;d<=daysInMonth;d++){
     const ds=monthlyYear+'-'+String(monthlyMonth+1).padStart(2,'0')+'-'+String(d).padStart(2,'0');
     const isToday=ds===todayS;
-    const dayTasks=tasks.filter(t=>t.due===ds||taskScheduleDate(t)===ds);
+    // 월간은 그 달의 데일리 작업뿐 아니라 위클리에만 배정된 작업도 모아 보여준다.
+    // plannedWeek는 해당 주의 시작일 칸에 표시해 중복 없이 찾을 수 있게 한다.
+    const dayTasks=tasks.filter(t=>t.due===ds||taskScheduleDate(t)===ds||t.plannedWeek===ds);
     const gcalDay=gcalEvents.filter(e=>{
       const ed=e.start.dateTime?e.start.dateTime.split('T')[0]:e.start.date;
       if(ed!==ds) return false;
@@ -3756,8 +3777,8 @@ function renderMonthly(){
       ...dayTasks.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return`<div class="monthly-ev" style="background:${p.color}${done?'11':'22'};color:${p.color};${done?'opacity:.45;text-decoration:line-through':''};border-left:2px solid ${p.color}" ondblclick="goToDailyDate('${ds}')" onclick="event.stopPropagation();openPanel(${t.id})">${esc(t.name)}</div>`;}),
       ...gcalDay.map(e=>`<div class="monthly-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'};border-left:2px solid ${e._calColor||'#4285f4'}">${esc(e.summary||'')}</div>`)
     ];
-    const MAX=3;
-    const evHtml=allEvs.slice(0,MAX).join('')+(allEvs.length>MAX?`<div class="monthly-more">+${allEvs.length-MAX}개</div>`:'');
+    // 숨김(+N) 없이 해당 날짜의 모든 작업을 표시한다.
+    const evHtml=allEvs.join('');
     html+=`<div class="monthly-cell${isToday?' today':''}" ondblclick="goToDailyDate('${ds}')">
       <div class="monthly-day-num">${d}</div>
       ${evHtml}
