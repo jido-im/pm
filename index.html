@@ -356,6 +356,11 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .tl-block.dragging-block{opacity:.7;box-shadow:0 4px 16px rgba(0,0,0,.2)}
 .tl-block-name{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;font-weight:600}
 .tl-block-time{font-size:10px;opacity:.75}
+.tl-block-actions{position:absolute;top:4px;right:4px;display:flex;gap:4px;z-index:20;opacity:0;transform:translateY(-2px);pointer-events:none;transition:opacity .14s ease,transform .14s ease}
+.tl-block:hover .tl-block-actions,.tl-block.selected .tl-block-actions{opacity:1;transform:translateY(0);pointer-events:auto}
+.tl-block:hover .tl-block-body,.tl-block.selected .tl-block-body{padding-right:48px!important}
+.tl-block-action{width:18px;height:18px;border:0;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:11px;font-weight:800;line-height:1;cursor:pointer;box-shadow:0 1px 3px rgba(0,0,0,.2)}
+.tl-block-action.complete{background:#34a853}.tl-block-action.delete{background:#ea4335}
 .tl-block-resize{position:absolute;bottom:0;left:0;right:0;height:14px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,rgba(0,0,0,.12));border-radius:0 0 6px 6px}
 .tl-now-wrap{position:absolute;left:0;right:0;pointer-events:none;z-index:5}
 .tl-now-line{position:absolute;left:52px;right:0;height:2px;background:var(--red)}
@@ -468,7 +473,13 @@ body{font-family:'Pretendard',-apple-system,sans-serif;background:#f2f1ed;color:
 .monthly-cell.other-month{background:var(--bg);opacity:.5}
 .monthly-day-num{font-size:12px;font-weight:600;width:22px;height:22px;display:flex;align-items:center;justify-content:center;margin-bottom:3px;flex-shrink:0}
 .monthly-cell.today .monthly-day-num{background:var(--blue);color:#fff;border-radius:50%}
-.monthly-ev{font-size:10px;padding:2px 5px;border-radius:4px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;cursor:pointer}
+.monthly-ev{font-size:10px;padding:2px 5px;border-radius:4px;margin-bottom:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-weight:500;cursor:pointer;position:relative;min-height:18px}
+.monthly-ev.task-event:hover{overflow:visible;padding-right:38px;z-index:8;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.monthly-ev-actions{position:absolute;top:1px;right:2px;display:flex;gap:2px;opacity:0;pointer-events:none;transition:opacity .12s ease}
+.monthly-ev.task-event:hover .monthly-ev-actions{opacity:1;pointer-events:auto}
+.monthly-ev-action{width:15px;height:15px;border:0;border-radius:50%;padding:0;display:flex;align-items:center;justify-content:center;color:#fff;font-size:9px;font-weight:800;line-height:1;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.18)}
+.monthly-ev-action.complete{background:#34a853}.monthly-ev-action.delete{background:#ea4335}
+@media(hover:none){.monthly-ev.task-event{padding-right:38px}.monthly-ev.task-event .monthly-ev-actions{opacity:1;pointer-events:auto}}
 .monthly-more{font-size:10px;color:var(--text3);padding-left:3px}
 
 /* Report */
@@ -2270,7 +2281,7 @@ function quickToggle(id, e){
   pushUndo();
   t.status=t.status==='done'?'todo':'done';
   saveLocal();scheduleSave();
-  renderDaily();renderWeekly();renderBoard();renderTree();renderStats();renderProjFilter();
+  renderDaily();renderWeekly();renderMonthly();renderBoard();renderTree();renderStats();renderProjFilter();
 }
 
 function attachSwipe(el){
@@ -2585,12 +2596,16 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
       <div class="tl-block-name">${esc(t.name)}</div>
       <div class="tl-block-time">${fmtHM(t.startHour,t.startMin||0)} · ${fmtMins(dur)}</div>
     </div>
+    <div class="tl-block-actions" aria-label="블록 작업">
+      <button class="tl-block-action complete" onclick="quickToggle(${t.id},event)" title="완료" aria-label="${esc(t.name)} 완료">✓</button>
+      <button class="tl-block-action delete" onclick="deleteWeeklyTask(${t.id},event)" title="삭제" aria-label="${esc(t.name)} 삭제">×</button>
+    </div>
     <div class="tl-block-resize" data-id="${t.id}" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;background:linear-gradient(to bottom,transparent,${p.color}33);border-radius:0 0 6px 6px;z-index:11"></div>
   `;
 
   // ── Mouse drag: normal=move, Cmd=add log, Option/Alt=copy ──
   el.addEventListener('mousedown', e=>{
-    if(e.target.classList.contains('tl-block-resize')||e.target.classList.contains('tl-block-top-handle')) return;
+    if(e.target.classList.contains('tl-block-resize')||e.target.classList.contains('tl-block-top-handle')||e.target.closest('.tl-block-actions')) return;
     e.preventDefault();
     selectBlock(t.id,el);
     // 실수로 복제되지 않도록 보조 기능은 Shift 조합일 때만 활성화
@@ -2598,6 +2613,7 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
     const isOptDrag=e.shiftKey&&e.altKey;                // Shift+Option/Alt = copy task
     const startY=e.clientY;
     let pointerY=startY;
+    const grabOffsetY=startY-el.getBoundingClientRect().top;
     const origTop=parseInt(el.style.top);
     const ds=dailyDateStr(dailyDate);
     const dragWrap=document.getElementById('daily-tl-wrap');
@@ -2643,9 +2659,11 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
       if(!moved){if(ghost)ghost.remove();return;}
       pushUndo();
 
-      const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top);
+      const visualTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top);
       // 화면에서 보이는 블록의 상단 위치를 그대로 시작 시간으로 확정한다.
-      // 포인터 시간을 쓰면 블록 가운데를 잡았을 때 잡은 높이만큼 아래에 놓인다.
+      // mouseup의 최종 좌표와 처음 잡은 지점을 사용해 마지막 이벤트 누락도 보정한다.
+      const directTop=pointerY-container.getBoundingClientRect().top-grabOffsetY;
+      const targetTop=Number.isFinite(directTop)?directTop:visualTop;
       const droppedMins=Math.round(topToMins(targetTop)/30)*30;
       const maxStart=Math.max(0,24*60-(t.plannedTime||60));
       const newMins=Math.max(0,Math.min(maxStart,Number.isFinite(droppedMins)?droppedMins:Math.round(targetTop/SLOT_H)*30));
@@ -2908,7 +2926,7 @@ function quickDeleteTask(id){
   pushUndo();
   tasks=tasks.filter(t=>!toDelete.includes(t.id));
   timeLogs=timeLogs.filter(l=>!toDelete.includes(l.taskId));
-  saveLocal();scheduleSave();renderDaily();renderWeekly();renderBoard();renderTree();renderStats();
+  saveLocal();scheduleSave();renderDaily();renderWeekly();renderMonthly();renderBoard();renderTree();renderStats();
   showToast('삭제됐어요');
 }
 
@@ -3398,6 +3416,7 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     const isOptDrag=e.altKey;
     const startX=e.clientX, startY=e.clientY;
     let pointerX=startX, pointerY=startY;
+    const grabOffsetY=startY-el.getBoundingClientRect().top;
     const origTop=parseInt(el.style.top);
     const dragWrap=document.getElementById('weekly-tl-wrap');
     const dragStartScrollTop=dragWrap?.scrollTop||0;
@@ -3427,14 +3446,15 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
       if(!moved){if(ghost)ghost.remove();return;}
       pushUndo();
 
-      const targetTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top)||origTop;
+      const visualTop=parseInt((isCmdDrag||isOptDrag)?ghost?.style.top||origTop:el.style.top)||origTop;
       if(ghost) ghost.remove();
       const targetCol=[...document.querySelectorAll('#weekly-tl-wrap .weekly-day-col')].find(dayCol=>{
         const rect=dayCol.getBoundingClientRect();
         return pointerX>=rect.left&&pointerX<=rect.right&&pointerY>=rect.top&&pointerY<=rect.bottom;
       });
-      // 드래그 중 화면에 보이는 블록 상단을 그대로 확정해, 마우스를 잡은 지점에
-      // 따라 최종 위치가 아래로 밀리지 않게 한다.
+      // mouseup의 최종 좌표와 처음 잡은 지점으로 대상 열 안의 정확한 상단을 계산한다.
+      const directTop=targetCol?pointerY-targetCol.getBoundingClientRect().top-grabOffsetY:visualTop;
+      const targetTop=Number.isFinite(directTop)?directTop:visualTop;
       const droppedMins=Math.round(topToMins(targetTop)/30)*30;
       const maxStart=Math.max(0,24*60-(t.plannedTime||60));
       const newMins=Math.max(0,Math.min(maxStart,droppedMins));
@@ -3773,7 +3793,7 @@ function renderMonthly(){
       return !isDuplicate;
     });
     const allEvs=[
-      ...dayTasks.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return`<div class="monthly-ev" style="background:${p.color}${done?'11':'22'};color:${p.color};${done?'opacity:.45;text-decoration:line-through':''};border-left:2px solid ${p.color}" ondblclick="goToDailyDate('${ds}')" onclick="event.stopPropagation();openPanel(${t.id})">${esc(t.name)}</div>`;}),
+      ...dayTasks.map(t=>{const p=getProj(t.projId);const done=t.status==='done';return`<div class="monthly-ev task-event" style="background:${p.color}${done?'11':'22'};color:${p.color};${done?'opacity:.45;text-decoration:line-through':''};border-left:2px solid ${p.color}" ondblclick="goToDailyDate('${ds}')" onclick="event.stopPropagation();openPanel(${t.id})"><span>${esc(t.name)}</span><span class="monthly-ev-actions"><button class="monthly-ev-action complete" onclick="quickToggle(${t.id},event)" title="${done?'완료 취소':'완료'}" aria-label="${esc(t.name)} 완료">✓</button><button class="monthly-ev-action delete" onclick="deleteWeeklyTask(${t.id},event)" title="삭제" aria-label="${esc(t.name)} 삭제">×</button></span></div>`;}),
       ...gcalDay.map(e=>`<div class="monthly-ev" style="background:${e._calColor||'#4285f4'}22;color:${e._calColor||'#4285f4'};border-left:2px solid ${e._calColor||'#4285f4'}">${esc(e.summary||'')}</div>`)
     ];
     // 숨김(+N) 없이 해당 날짜의 모든 작업을 표시한다.
