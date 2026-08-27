@@ -2507,13 +2507,19 @@ function renderDailyTimeline(ds, dayTasks){
   const colMap=computeColumns(allBlocks);
 
   // Render PM blocks
-  pmBlocks.forEach(t=>renderTaskBlock(t, wrap, colMap[t.id]||{col:0,total:1}));
+  pmBlocks.forEach(t=>renderTaskBlock(t, wrap, colMap[blockLayoutKey(t)]||{col:0,total:1}));
   // Render gcal blocks with column info
-  gcalAsBlocks.forEach(b=>renderGcalBlock(b._gcal, wrap, colMap[b.id]||{col:0,total:1}));
+  gcalAsBlocks.forEach(b=>renderGcalBlock(b._gcal, wrap, colMap[blockLayoutKey(b)]||{col:0,total:1}));
 
   // Scroll to 8am or now
   const scrollTo=isToday?Math.max(0,minsToTop(nowH*60+nowMin)-100):minsToTop(8*60);
   setTimeout(()=>{ const w=document.getElementById('daily-tl-wrap'); if(w) w.scrollTop=scrollTo; },50);
+}
+
+function blockLayoutKey(t){
+  if(t._layoutKey)return t._layoutKey;
+  if(t._logId!==undefined&&t._logId!==null)return 'log-'+t._logId;
+  return 'item-'+t.id;
 }
 
 function computeColumns(tasks){
@@ -2533,15 +2539,15 @@ function computeColumns(tasks){
     let col=0;
     while(colEnds[col]!==undefined && colEnds[col]>s) col++;
     colEnds[col]=e;
-    cols[t.id]={col,total:1};
+    cols[blockLayoutKey(t)]={col,total:1};
   });
 
   let group=[];
   let groupEnd=-1;
   const finishGroup=()=>{
     if(!group.length) return;
-    const total=Math.max(...group.map(t=>cols[t.id].col))+1;
-    group.forEach(t=>{cols[t.id].total=total;});
+    const total=Math.max(...group.map(t=>cols[blockLayoutKey(t)].col))+1;
+    group.forEach(t=>{cols[blockLayoutKey(t)].total=total;});
   };
   sorted.forEach(t=>{
     const s=(t.startHour||0)*60+(t.startMin||0);
@@ -2563,7 +2569,8 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
 
   const el=document.createElement('div');
   el.className='tl-block';
-  el.id='tl-block-'+t.id;
+  el.id='tl-block-'+t.id+'-'+(t._logId!==undefined&&t._logId!==null?'log-'+t._logId:'scheduled');
+  el.dataset.taskId=t.id;
   const col=colInfo.col||0;
   const total=colInfo.total||1;
   const tlLeft=58; // time label width px
@@ -2585,7 +2592,7 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
   el.addEventListener('mousedown', e=>{
     if(e.target.classList.contains('tl-block-resize')||e.target.classList.contains('tl-block-top-handle')) return;
     e.preventDefault();
-    selectBlock(t.id);
+    selectBlock(t.id,el);
     // 실수로 복제되지 않도록 보조 기능은 Shift 조합일 때만 활성화
     const isCmdDrag=e.shiftKey&&(e.metaKey||e.ctrlKey); // Shift+Cmd/Ctrl = add log
     const isOptDrag=e.shiftKey&&e.altKey;                // Shift+Option/Alt = copy task
@@ -2689,7 +2696,7 @@ function renderTaskBlock(t, container, colInfo={col:0,total:1}){
   // ── Click to select / dblclick to open ──
   el.addEventListener('click', e=>{
     e.stopPropagation();
-    selectBlock(t.id);
+    selectBlock(t.id,el);
   });
   el.addEventListener('dblclick', e=>{ e.stopPropagation(); openPanel(t.id); });
 
@@ -2810,11 +2817,11 @@ document.addEventListener('click',e=>{
   if(!e.target.closest('.weekly-block')) document.querySelectorAll('.weekly-block.actions-visible').forEach(el=>el.classList.remove('actions-visible'));
   hideCtxMenu();
 });
-function selectBlock(id){
+function selectBlock(id, blockEl=null){
   // Deselect previous
   document.querySelectorAll('.tl-block.selected').forEach(el=>el.classList.remove('selected'));
   selectedBlockId=id;
-  const el=document.getElementById('tl-block-'+id);
+  const el=blockEl||document.querySelector(`.tl-block[data-task-id="${id}"]`);
   if(el) el.classList.add('selected');
 }
 function syncWeeklySelectionClasses(){
@@ -3328,9 +3335,9 @@ function renderWeekly(preserveScroll=false){
     const colMap=computeColumns(allBlocks);
 
     // Render PM blocks
-    allPMBlocks.forEach(t=>renderWeeklyTaskBlock(t,col,colMap[t.id]||{col:0,total:1}));
+    allPMBlocks.forEach(t=>renderWeeklyTaskBlock(t,col,colMap[blockLayoutKey(t)]||{col:0,total:1}));
     // Render GCal blocks
-    gcalAsBlocks.forEach(b=>renderWeeklyGcalBlock(b._gcal,col,colMap[b.id]||{col:0,total:1}));
+    gcalAsBlocks.forEach(b=>renderWeeklyGcalBlock(b._gcal,col,colMap[blockLayoutKey(b)]||{col:0,total:1}));
   });
 
   requestAnimationFrame(renderWeeklyDependencyLines);
@@ -3356,11 +3363,13 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
   const visibleLayer=Math.min(c,4);
   const stackOffset=visibleLayer*7;
   const maxStackOffset=Math.min(total-1,4)*7;
+  const ds=dailyDateStr(col._date||new Date());
 
   const el=document.createElement('div');
   el.className='weekly-block'+(isCompact?' compact-overlap':'')+(height<52?' short-title':'')+(selItems.has(t.id)?' multi-selected':'');
-  el.id='wb-'+t.id;
+  el.id='wb-'+t.id+'-'+(t._logId!==undefined&&t._logId!==null?'log-'+t._logId:ds);
   el.dataset.taskId=t.id;
+  if(t._logId!==undefined&&t._logId!==null)el.dataset.logId=t._logId;
   el.style.cssText=isCompact
     ?`top:${top}px;height:${height}px;left:${2+stackOffset}px;width:calc(100% - ${maxStackOffset+4}px);background:${p.color}ee;border:1.5px solid ${p.color};color:#fff;overflow:visible;position:absolute;z-index:${30+c}`
     :`top:${top}px;height:${height}px;left:calc(${leftPct}% + 1px);width:calc(${pct}% - 2px);background:${p.color}22;border:1.5px solid ${p.color}55;color:${p.color};overflow:visible;position:absolute;z-index:${30+c}`;
@@ -3380,9 +3389,6 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
     <div class="weekly-block-resize" style="position:absolute;bottom:-3px;left:0;right:0;height:14px;cursor:ns-resize;z-index:11;border-radius:0 0 4px 4px"></div>
     <button class="weekly-link-handle output" aria-label="${esc(t.name)}에서 후행 작업 연결 시작" onpointerdown="startDependencyPointer(event,${t.id})" onclick="event.stopPropagation()"></button>
   `;
-
-  const ds=dailyDateStr(col._date||new Date());
-
   // ── Mouse drag: normal=move, Cmd=add log, Option=copy ──
   el.addEventListener('mousedown', e=>{
     if(e.target.classList.contains('weekly-block-resize')||e.target.classList.contains('weekly-block-top-handle')||e.target.closest('.weekly-link-handle')||e.target.closest('.weekly-block-actions')) return;
@@ -3460,9 +3466,13 @@ function renderWeeklyTaskBlock(t, col, colInfo={col:0,total:1}){
         const minuteDelta=newMins-((t.startHour||0)*60+(t.startMin||0));
         moveIds.forEach(moveId=>{
           const member=tasks.find(item=>item.id===moveId);if(!member)return;
-          const oldDs=taskScheduleDate(member);if(!oldDs||member.startHour===undefined||member.startHour===null||member.startHour==='')return;
+          const isDraggedBlock=moveId===t.id;
+          const oldDs=isDraggedBlock?ds:taskScheduleDate(member);
+          const baseHour=isDraggedBlock?t.startHour:member.startHour;
+          const baseMin=isDraggedBlock?t.startMin:member.startMin;
+          if(!oldDs||baseHour===undefined||baseHour===null||baseHour==='')return;
           const shifted=new Date(oldDs+'T00:00:00');
-          shifted.setHours(Number(member.startHour)||0,Number(member.startMin)||0,0,0);
+          shifted.setHours(Number(baseHour)||0,Number(baseMin)||0,0,0);
           shifted.setDate(shifted.getDate()+dayDelta);
           shifted.setMinutes(shifted.getMinutes()+minuteDelta);
           const nextDs=dailyDateStr(shifted),nextH=shifted.getHours(),nextM=shifted.getMinutes();
